@@ -168,6 +168,22 @@ async function waitFor(check, what = '条件', timeoutMs = 2000) {
   }
 }
 
+/**
+ * 点「加某一套地形」的按钮。
+ *
+ * 地形控件 2026-11-15 从 `<select>` 换成了一排按钮（下拉在真机上两次「点不动」），
+ * 所以测试也走按钮——和用户真点的路径一致。
+ */
+function pickTerrain(root, label) {
+  const btn = root.querySelectorAll('.map-terrain')
+    .find((b) => b.textContent.replace(/^[＋▾]\s*/, '').trim() === label);
+  if (!btn) {
+    throw new Error(`找不到地形按钮「${label}」；现有: ${root.querySelectorAll('.map-terrain').map((b) => b.textContent).join(' / ')}`);
+  }
+  btn.fire('click');
+  return btn;
+}
+
 // ---------------------------------------------------------------------------
 // 夹具
 // ---------------------------------------------------------------------------
@@ -360,30 +376,39 @@ test('选地形不直接加：先出勾选表，勾着才加', async () => {
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
 
-  const sel = root.querySelector('select');
-  assert.ok(sel, '该有地形下拉');
-  const opts = sel.childNodes.filter((n) => n.tagName === 'OPTION').map((o) => o.getAttribute('value'));
-  for (const id of ['neighborhood', 'riverside', 'foothill', 'travel']) {
-    assert.ok(opts.includes(id), `缺地形选项 ${id}：${opts.join(',')}`);
+  // 五套地形都是一排按钮（不是下拉——下拉在真机上两次「点不动」）
+  const labels = root.querySelectorAll('.map-terrain').map((b) => b.textContent.replace(/^[＋▾]\s*/, '').trim());
+  for (const label of ['林间', '小区', '江边', '山脚', '旅行']) {
+    assert.ok(labels.includes(label), `缺地形按钮「${label}」：${labels.join(',')}`);
   }
 
-  // 选一套「还没加过」的地形：应当出勾选表，而不是立刻加进去
-  sel.value = 'riverside';
-  sel.fire('change');
+  // 点一套「还没加过」的地形：应当出勾选表，而不是立刻加进去
+  pickTerrain(root, '江边');
   await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
   assert.equal(root.querySelectorAll('.map-card').length, 5, '还没点「加进去」之前一处都不该加');
 
-  // 默认全选（2026-11-15 定）
-  const boxes = root.querySelector('.map-picker').querySelectorAll('input')
-    .filter((i) => i.getAttribute('type') === 'checkbox');
-  assert.equal(boxes.length, 5, '勾选表该列出这套的 5 处');
-  assert.equal(boxes.filter((b) => b.checked).length, 5, '默认应当全选');
+  // 默认全选（2026-11-15 定）。勾的记号是行自己的 class + ✓，不是原生 checkbox。
+  const rows = () => root.querySelector('.map-picker').querySelectorAll('.map-pick')
+    .filter((r) => !r.classList.contains('map-pick-done'));
+  assert.equal(rows().length, 5, '勾选表该列出这套的 5 处');
+  assert.equal(rows().filter((r) => r.classList.contains('map-pick-on')).length, 5, '默认应当全选');
+  // ✓ 看得见：每行的记号都是 ✓ 而不是 ○
+  assert.ok(rows().every((r) => r.querySelector('.map-pick-glyph').textContent === '✓'), '选中的行该有 ✓');
 
-  // 取消两处，只加剩下三处
-  boxes[1].checked = false;
-  boxes[1].fire('change');
-  boxes[2].checked = false;
-  boxes[2].fire('change');
+  // 摘要要说清勾了哪几处
+  const summary = root.querySelector('.map-picker').querySelector('.map-picked');
+  assert.ok(summary.textContent.includes('5 处'), `摘要该报数量：${summary.textContent}`);
+  assert.ok(summary.textContent.includes('江边石墩'), `摘要该列出名字：${summary.textContent}`);
+
+  // 点两下取消（点整行，不是点复选框）
+  rows()[1].fire('click');
+  await waitFor(() => rows().filter((r) => r.classList.contains('map-pick-on')).length === 4, '取消一处后剩 4');
+  root.querySelector('.map-picker').querySelectorAll('.map-pick').find((r) => r.querySelector('.map-pick-name').textContent === '旧码头').fire('click');
+  await waitFor(() => rows().filter((r) => r.classList.contains('map-pick-on')).length === 3, '取消两处后剩 3');
+  // 摘要跟着变
+  assert.ok(root.querySelector('.map-picker').querySelector('.map-picked').textContent.includes('3 处'),
+    '摘要该跟着变成 3 处');
+
   const submit = root.querySelector('.map-picker').findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
   assert.ok(submit, '该有「加进去」按钮');
   submit.fire('click');
@@ -404,16 +429,13 @@ test('勾选表：一套已经全加完时，明说「都已在图上」而不�
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
 
-  const sel = root.querySelector('select');
-  sel.value = 'forest'; // 这一套已经全加过了
-  sel.fire('change');
+  pickTerrain(root, '林间'); // 这一套已经全加过了
   await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
 
   const picker = root.querySelector('.map-picker');
   assert.ok(picker.textContent.includes('都已在图上'), `该明说全加完了：${picker.textContent.slice(0, 80)}`);
-  // 没有可勾的框（不给点不动的东西）
-  const boxes = picker.querySelectorAll('input').filter((i) => i.getAttribute('type') === 'checkbox');
-  assert.equal(boxes.length, 0, '都已经有了就不该再有勾选框');
+  // 没有可勾的行（不给点不动的东西）
+  assert.equal(picker.querySelectorAll('.map-pick-on').length, 0, '都已经有了就不该再有可勾的行');
   // 只留一个能用的「取消」
   const btns = picker.findAll((n) => n.tagName === 'BUTTON');
   assert.equal(btns.length, 1, '只该剩一个按钮');
@@ -421,54 +443,56 @@ test('勾选表：一套已经全加完时，明说「都已在图上」而不�
   assert.notEqual(btns[0].disabled, true, '「取消」必须是可点的');
 });
 
-test('占位项不显示当前地形名（那会看着像已经选好了）', async () => {
-  // 真机截图：下拉显示「山脚」，其实是占位项的文字——值是空串，点它什么都不会发生。
+test('地形是一排按钮，不是下拉（下拉在真机上两次「点不动」）', async () => {
   const { mount } = await mountPanels();
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
-  const sel = root.querySelector('select');
-  const first = sel.childNodes.filter((n) => n.tagName === 'OPTION')[0];
-  assert.equal(first.getAttribute('value'), '', '占位项的值是空串');
-  assert.ok(!first.textContent.includes('林间'), `占位项不该写地形名：${first.textContent}`);
-  assert.ok(first.textContent.includes('选一套地形'), `占位项该是一句动作：${first.textContent}`);
-  // 当前地形另用一个小标签显示
+
+  assert.equal(root.querySelector('select'), null, '不该再有 <select>');
+  assert.equal(root.querySelectorAll('.map-terrain').length, 5, '该有 5 个地形按钮');
+  // 当前地形用一个小标签显示，而不是塞进按钮里假装已选中
   assert.ok(root.textContent.includes('当前'), '该有「当前：林间」这样的标签');
+
+  // 有手动刷新按钮：界面停在旧状态时不用重开 Coo
+  const refresh = root.findAll((n) => n.tagName === 'BUTTON' && n.textContent === '刷新')[0];
+  assert.ok(refresh, '该有「刷新」按钮');
+  assert.equal(refresh.disabled, false);
 });
 
-test('选「占位项」（空值）不会把已展开的勾选表收掉', async () => {
+test('点当前那套地形的按钮会切换收起，不会卡死', async () => {
   const { mount } = await mountPanels();
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
-  const sel = root.querySelector('select');
-  sel.value = 'riverside';
-  sel.fire('change');
-  await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
-  // 再把下拉拨回占位项
-  const sel2 = root.querySelector('select');
-  sel2.value = '';
-  sel2.fire('change');
-  await new Promise((r) => setTimeout(r, 30));
-  assert.ok(root.querySelector('.map-picker'), '点占位项不该让面板看起来什么都没发生');
+
+  pickTerrain(root, '江边');
+  await waitFor(() => root.querySelector('.map-picker'), '先出勾选表');
+  // 再点另一个地形：勾选表应当切到那一套，而不是没反应
+  pickTerrain(root, '山脚');
+  await waitFor(() => root.querySelector('.map-picker'), '切到山脚');
+  assert.ok(root.querySelector('.map-picker').textContent.includes('山脚'), '勾选表该切到山脚');
 });
 
 test('勾选表：全选 / 全不选按钮', async () => {
   const { mount } = await mountPanels();
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
-  const sel = root.querySelector('select');
-  sel.value = 'foothill';
-  sel.fire('change');
+  pickTerrain(root, '山脚');
   await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
 
-  const boxes = () => root.querySelector('.map-picker').querySelectorAll('input')
-    .filter((i) => i.getAttribute('type') === 'checkbox');
+  const onRows = () => root.querySelector('.map-picker').querySelectorAll('.map-pick-on');
   const btn = (label) => root.querySelector('.map-picker')
     .findAll((n) => n.tagName === 'BUTTON' && n.textContent === label)[0];
 
   btn('全不选').fire('click');
-  await waitFor(() => boxes().filter((b) => b.checked).length === 0, '全不选之后一个都不勾');
+  await waitFor(() => onRows().length === 0, '全不选之后一个都不勾');
+  // 一条都没勾时：摘要明说、按钮禁用（不给出一个点了没用的按钮）
+  assert.ok(root.querySelector('.map-picker').querySelector('.map-picked').textContent.includes('还没勾'),
+    '全不选时摘要该说「还没勾」');
+  const submit0 = root.querySelector('.map-picker').findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
+  assert.equal(submit0.disabled, true, '一处都没勾时「加进去」该禁用');
+
   btn('全选').fire('click');
-  await waitFor(() => boxes().filter((b) => b.checked).length === 5, '全选之后全勾');
+  await waitFor(() => onRows().length === 5, '全选之后全勾');
 });
 
 // ---------------------------------------------------------------------------
@@ -678,6 +702,139 @@ test('没装娱乐时间或开关关掉 → 详情里不提 fun_go', async () =>
     const text = root.querySelector('.map-detail').textContent;
     assert.ok(!text.includes('fun_go'), `不该出现 fun_go：${text.slice(-200)}`);
   }
+});
+
+test('删除一处之后，地形下拉仍然能用（会出勾选表）', async () => {
+  // 2026-11-15 真机反馈：删掉一处之后，下拉就「点不动」了。
+  const { mount } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+
+  // 删掉「蘑菇坡」
+  globalThis.window = { confirm: () => true };
+  try {
+    root.querySelectorAll('.map-card').find((c) => c.querySelector('.map-card-name').textContent === '蘑菇坡').fire('click');
+    await waitFor(() => root.querySelector('.map-detail'), '展开详情');
+    root.querySelector('.map-detail').findAll((n) => n.tagName === 'BUTTON' && n.textContent === '删掉这处')[0].fire('click');
+    await waitFor(() => root.querySelectorAll('.map-card').length === 4, '删掉之后剩 4 张');
+  } finally {
+    delete globalThis.window;
+  }
+
+  // 删除之后，地形按钮应当照常工作
+  const btns = root.querySelectorAll('.map-terrain');
+  assert.equal(btns.length, 5, '删除之后地形按钮还在');
+  assert.ok(btns.every((b) => b.disabled !== true), '删除之后按钮都不该被禁用');
+  pickTerrain(root, '山脚');
+  await waitFor(() => root.querySelector('.map-picker'), '删除之后仍能出勾选表');
+});
+
+test('删除一处之后，「加一处」仍然能用', async () => {
+  const { mount } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+
+  globalThis.window = { confirm: () => true };
+  try {
+    root.querySelectorAll('.map-card').find((c) => c.querySelector('.map-card-name').textContent === '蘑菇坡').fire('click');
+    await waitFor(() => root.querySelector('.map-detail'), '展开详情');
+    root.querySelector('.map-detail').findAll((n) => n.tagName === 'BUTTON' && n.textContent === '删掉这处')[0].fire('click');
+    await waitFor(() => root.querySelectorAll('.map-card').length === 4, '删掉之后剩 4 张');
+  } finally {
+    delete globalThis.window;
+  }
+
+  const addBtn = root.findAll((n) => n.tagName === 'BUTTON' && /加一处|取消/.test(n.textContent))[0];
+  assert.ok(addBtn, '删除之后「加一处」还在');
+  addBtn.fire('click');
+  await waitFor(() => root.querySelectorAll('input').some((i) => i.placeholder === '叫什么'), '删除之后仍能出加地方的表单');
+});
+
+test('勾选表开着的时候删掉一处，勾选表仍然能用', async () => {
+  // 这条钉的是 state.picked / pickedFor 的陈旧状态：删除会改 exists，
+  // 如果 picker 不重新按 exists 初始化，就会出现「勾了也不生效、按钮灰着」的假死。
+  const { mount } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+
+  // 先开一个勾选表（江边，5 处都没加）
+  pickTerrain(root, '江边');
+  await waitFor(() => root.querySelector('.map-picker'), '先出勾选表');
+
+  // 再把「蘑菇坡」删掉
+  globalThis.window = { confirm: () => true };
+  try {
+    root.querySelectorAll('.map-card').find((c) => c.querySelector('.map-card-name').textContent === '蘑菇坡').fire('click');
+    await waitFor(() => root.querySelector('.map-detail'), '展开详情');
+    root.querySelector('.map-detail').findAll((n) => n.tagName === 'BUTTON' && n.textContent === '删掉这处')[0].fire('click');
+    await waitFor(() => root.querySelectorAll('.map-card').length === 4, '删掉之后剩 4 张');
+  } finally {
+    delete globalThis.window;
+  }
+
+  // 勾选表应该还在，而且按钮可点
+  const picker = root.querySelector('.map-picker');
+  assert.ok(picker, '删除之后勾选表还该在');
+  const submit = picker.findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
+  assert.ok(submit, '勾选表里该有「加进去」');
+  assert.notEqual(submit.disabled, true, `默认全选，按钮该可点（实际 disabled=${submit.disabled}）`);
+});
+
+test('守门断言：按钮上的处数必须等于「看起来勾着的行数」（不能写 5 处却一个没勾）', async () => {
+  // 2026-11-15 真机截图：五个框全空着，按钮却写「加进去（5 处）」——完全没法判断。
+  // 这条把「看到的」和「实际会加的」钉死成同一个数。
+  const { mount } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+
+  const check = (label) => {
+    const picker = root.querySelector('.map-picker');
+    assert.ok(picker, `「${label}」时该有勾选表`);
+    const on = picker.querySelectorAll('.map-pick-on').length;
+    const btn = picker.findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
+    const n = Number((/（(\d+) 处）/.exec(btn.textContent) ?? [])[1]);
+    assert.equal(n, on, `「${label}」时按钮写 ${n} 处，但看着勾着的是 ${on} 行`);
+    // 摘要里的数字也得是同一个
+    const m = Number((/(\d+) 处/.exec(picker.querySelector('.map-picked').textContent) ?? [])[1] ?? 0);
+    assert.equal(m, on, `「${label}」时摘要写 ${m} 处，但看着勾着的是 ${on} 行`);
+    return on;
+  };
+
+  pickTerrain(root, '江边');
+  await waitFor(() => root.querySelector('.map-picker'), '出勾选表');
+  assert.equal(check('默认'), 5, '默认该是 5 处且 5 行亮着');
+
+  // 逐行点掉，每一步都要自洽
+  for (const want of [4, 3, 2, 1, 0]) {
+    const rows = root.querySelector('.map-picker').querySelectorAll('.map-pick-on');
+    rows[0].fire('click');
+    await waitFor(() => root.querySelector('.map-picker').querySelectorAll('.map-pick-on').length === want,
+      `点掉一行后剩 ${want}`);
+    assert.equal(check(`剩 ${want}`), want);
+  }
+});
+
+test('summary：没勾时明说「还没勾」，勾了就列出名字', async () => {
+  const { mount } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+  pickTerrain(root, '山脚');
+  await waitFor(() => root.querySelector('.map-picker'), '出勾选表');
+
+  const summary = () => root.querySelector('.map-picker').querySelector('.map-picked').textContent;
+  assert.ok(summary().includes('5 处'), summary());
+  for (const name of ['家', '上山口', '山泉', '半坡亭', '碎石坡']) {
+    assert.ok(summary().includes(name), `摘要该列出「${name}」：${summary()}`);
+  }
+
+  // 全不选 → 明确说还没勾
+  root.querySelector('.map-picker').findAll((n) => n.tagName === 'BUTTON' && n.textContent === '全不选')[0].fire('click');
+  await waitFor(() => summary().includes('还没勾'), '全不选后摘要该说还没勾');
+
+  // 点一行 → 摘要只列那一处
+  root.querySelector('.map-picker').querySelectorAll('.map-pick').find((r) => r.querySelector('.map-pick-name').textContent === '山泉').fire('click');
+  await waitFor(() => summary().includes('山泉'), '点了「山泉」摘要该列出来');
+  assert.ok(!summary().includes('半坡亭'), `没勾的不该出现在摘要里：${summary()}`);
 });
 
 test('空地图：给的是「选一套地形」的引导，不是空白', async () => {

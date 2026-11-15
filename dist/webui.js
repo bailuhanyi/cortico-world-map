@@ -95,13 +95,28 @@ const CSS = `
 .map-picker-head strong{font-size:13.5px}
 .map-picker-head span{font-size:11.5px}
 .map-pick-list{display:flex;flex-direction:column;gap:2px}
-.map-pick{display:flex;gap:8px;align-items:baseline;padding:4px 6px;border-radius:var(--radius-sm,6px);cursor:pointer}
+.map-pick{display:flex;gap:8px;align-items:baseline;padding:6px 8px;border:1px solid transparent;border-radius:var(--radius-sm,6px);cursor:pointer}
 .map-pick:hover{background:var(--m-soft)}
-.map-pick input{margin:0;flex:none;cursor:pointer}
-.map-pick-name{font-weight:600;font-size:12.5px;flex:none;min-width:72px}
+.map-pick:focus-visible{outline:2px solid var(--m-accent);outline-offset:1px}
+/* 勾的记号自己画——不依赖原生 checkbox 的样子（真机上它没反馈，看着像没选中） */
+.map-pick-glyph{flex:none;width:16px;text-align:center;font-size:13px;line-height:1.2;color:var(--m-dim)}
+.map-pick-name{font-weight:600;font-size:12.5px;flex:none;min-width:72px;color:var(--m-dim)}
 .map-pick-meta{font-size:11.5px;color:var(--m-dim)}
-.map-pick-done{opacity:.55;cursor:default}
+/* 选中：整行高亮 + 记号变绿加粗，扫一眼就知道勾了哪些 */
+.map-pick-on{border-color:color-mix(in srgb,var(--m-accent) 45%,transparent);background:color-mix(in srgb,var(--m-accent) 9%,transparent)}
+.map-pick-on .map-pick-glyph{color:var(--m-accent);font-weight:700}
+.map-pick-on .map-pick-name{color:var(--m-ink);font-weight:700}
+.map-pick-on .map-pick-meta{color:var(--m-ink)}
+.map-pick-done{opacity:.5;cursor:default}
 .map-pick-done:hover{background:transparent}
+/* 「已经勾了哪几处」的摘要 */
+.map-picked{font-size:11.5px;color:var(--m-dim);padding:5px 9px;margin:8px 0 6px;border-radius:var(--radius-sm,6px);background:var(--m-soft);border:1px solid var(--m-line);line-height:1.5}
+.map-picked-on{color:var(--m-ink);border-color:color-mix(in srgb,var(--m-accent) 40%,var(--m-line))}
+
+/* 地形：一排按钮（替代原先的 <select>，见 renderHead 里的注释） */
+.map-terrains{display:flex;gap:6px;flex-wrap:wrap}
+.map-terrain{border-radius:999px!important;padding:4px 11px!important;font-size:12.5px;white-space:nowrap}
+.map-terrain-on{border-color:var(--m-accent)!important;background:color-mix(in srgb,var(--m-accent) 14%,var(--m-card))!important;font-weight:600}
 `;
 
 /** 面板自己的文案（服务端 config.js 的 panelText 另存一份，改文案时两处一起改）。 */
@@ -118,6 +133,8 @@ const T = {
     terrainPickHint: '＋ 选一套地形…',
     terrainNow: '当前',
     pickTitle: '挑要加哪几处',
+    pickedLabel: '已勾 ',
+    pickedNone: '还没勾任何一处——点下面的名字就能勾上。',
     pickAll: '全选',
     pickNone: '全不选',
     addOpen: '加一处',
@@ -162,6 +179,8 @@ const T = {
     loadFail: '面板加载失败',
     renderFail: '画面刷新失败',
     retry: '重新载入',
+    refresh: '刷新',
+    refreshHint: '界面停在旧状态时点这个，不用重开 Coo',
   },
   en: {
     title: 'Little World',
@@ -173,6 +192,8 @@ const T = {
     terrainPickHint: '+ Pick a terrain…',
     terrainNow: 'current',
     pickTitle: 'Pick the ones to add',
+    pickedLabel: 'Selected ',
+    pickedNone: 'Nothing selected yet — click a name below to tick it.',
     pickAll: 'Select all',
     pickNone: 'Select none',
     addOpen: 'Add a place',
@@ -217,6 +238,8 @@ const T = {
     loadFail: 'Panel failed to load',
     renderFail: 'This panel failed to redraw',
     retry: 'Reload',
+    refresh: 'Refresh',
+    refreshHint: 'Use this when the panel looks stuck; no need to restart Coo',
   },
 };
 
@@ -362,27 +385,26 @@ function mountPlaces(ctx) {
 
     const bar = el('div', { class: 'map-bar' });
 
-    // 地形：选中后**展开勾选表**，不直接全加（主人挑哪几处就加哪几处）。
+    // 地形：**一排按钮**，不用 <select>。
     //
-    // 两个坑（2026-11-15 真机反馈「点不动」）：
-    //   1. 占位选项的文字原本是「当前地形名」，于是下拉里显示「山脚」——
-    //      看着像已经选中了山脚，其实它的值是空串，点它什么都不会发生。
-    //      现在占位项写成一句**动作**（「＋ 选一套地形…」），当前地形另用一个小标签显示。
-    //   2. 选了一套**已经全加完**的地形时，勾选表里全是灰的、按钮禁用——也像「点不动」。
-    //      现在那种情况直接告诉她「这套已经都在图上了」，而不是给一张点不动的表。
-    const pick = el('select', {
-      title: t.terrain,
-      onchange: () => { chooseTerrain(pick.value); },
-      // 有些内嵌 webview 对 select 只发 input 不发 change，两个都挂上（重复触发无害）。
-      oninput: () => { chooseTerrain(pick.value); },
-    },
-    el('option', { value: '', text: t.terrainPickHint }),
-    d.terrains.map((x) => el('option', {
-      value: x.id,
-      text: `${x.label}（${x.count} 处${x.skeletons?.some((s) => s.exists) ? '，部分已加' : ''}）`,
-    })));
-    pick.value = state.terrainPick ?? '';
-    bar.appendChild(pick);
+    // 为什么换掉下拉（2026-11-15 两次真机反馈「点不动」）：
+    //   ① 占位项的文字原本是「当前地形名」，值是空串——看着像已选中，点它什么都不发生；
+    //   ② 更关键：`<select>` 依赖 `change`/`input` 事件，在内嵌 webview 里并不可靠，
+    //      出过「选了没反应」后完全无从排查。按钮的 `click` 没有这层不确定性。
+    // 现在每套地形是一个明确的按钮，点一下就是「我要加这一套」。
+    const terrainRow = el('div', { class: 'map-terrains' });
+    for (const x of d.terrains) {
+      const partial = x.skeletons?.some((s) => s.exists) ? ' ·部分已加' : '';
+      const active = state.terrainPick === x.id;
+      terrainRow.appendChild(el('button', {
+        type: 'button',
+        class: active ? 'map-terrain map-terrain-on' : 'map-terrain',
+        title: `${x.label}：${x.count} 处${partial}${x.note ? ' · ' + x.note : ''}`,
+        text: `${active ? '▾' : '＋'} ${x.label}`,
+        onclick: () => { chooseTerrain(x.id); },
+      }));
+    }
+    bar.appendChild(terrainRow);
 
     if (d.terrainLabel) {
       bar.appendChild(el('span', { class: 'map-chip', text: `${t.terrainNow}：${d.terrainLabel}` }));
@@ -395,6 +417,15 @@ function mountPlaces(ctx) {
       onclick: () => { state.adding = !state.adding; render(); },
     }));
 
+    // 手动刷新：万一界面停在旧状态（宿主没刷新、或我们某次渲染出错），
+    // 不用重开 Coo 也能自愈。这类「点不动」最后多半是这个救回来的。
+    bar.appendChild(el('button', {
+      type: 'button',
+      text: t.refresh,
+      title: t.refreshHint,
+      onclick: () => { state.terrainPick = ''; state.picked = null; state.message = null; void load(); },
+    }));
+
     head.appendChild(bar);
 
     if (state.terrainPick) head.appendChild(picker(state.terrainPick));
@@ -404,8 +435,7 @@ function mountPlaces(ctx) {
   /**
    * 选了一套地形。
    *
-   * 空值（占位项）**不改动**任何状态——不能因为它把已经展开的勾选表收掉，
-   * 否则用户点一下「选一套地形…」就看起来什么都没发生。
+   * 空值**不改动**任何状态——不能因为它把已经展开的勾选表收掉。
    */
   function chooseTerrain(id) {
     const next = typeof id === 'string' ? id.trim() : '';
@@ -458,27 +488,47 @@ function mountPlaces(ctx) {
     }
     const picked = state.picked;
 
+    /** 勾/取消一处，然后**整块重画**——让「看到的样子」永远等于 picked 里的事实。 */
+    const toggle = (id) => {
+      if (picked.has(id)) picked.delete(id); else picked.add(id);
+      render();
+    };
+
+    // 选中的那几处，用来写摘要和画勾。
+    const pickedNames = pending.filter((s) => picked.has(s.id)).map((s) => s.name);
+
     const rows = skeletons.map((s) => {
       const already = s.exists;
-      const box = el('input', {
-        type: 'checkbox',
-        checked: already ? null : (picked.has(s.id) ? 'checked' : null),
-        disabled: already ? 'disabled' : null,
-        onchange: () => {
-          if (already) return;
-          if (box.checked) picked.add(s.id); else picked.delete(s.id);
-          countLabel.textContent = `${t.addSubmit}（${picked.size} 处）`;
-          submit.disabled = picked.size === 0;
-        },
-      });
-      box.checked = !already && picked.has(s.id);
+      const on = !already && picked.has(s.id);
+      const glyph = already ? '·' : (on ? '✓' : '○');
       const alias = s.aliases.length ? `（也叫 ${s.aliases.slice(0, 3).join('、')}）` : '';
       const fun = s.funVenue ? ` · 娱乐时间里最接近「${s.funVenue}」` : '';
-      return el('label', { class: already ? 'map-pick map-pick-done' : 'map-pick' },
-        box,
-        el('span', { class: 'map-pick-name', text: s.name }),
-        el('span', { class: 'map-pick-meta', text: `${alias}［${s.kindLabel}］${fun}${already ? ' · 已经有了' : ''}` }));
+      const cls = ['map-pick'];
+      if (already) cls.push('map-pick-done');
+      else if (on) cls.push('map-pick-on');
+      return el('div', {
+        class: cls.join(' '),
+        role: already ? null : 'button',
+        tabindex: already ? null : '0',
+        'aria-pressed': already ? null : (on ? 'true' : 'false'),
+        onclick: already ? null : () => toggle(s.id),
+        onkeydown: already ? null : (ev) => {
+          if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
+            ev.preventDefault?.();
+            toggle(s.id);
+          }
+        },
+      },
+      // 勾的记号自己画：不依赖原生 checkbox 的样子（真机上它没反馈，看着像没选中）。
+      el('span', { class: 'map-pick-glyph', text: glyph }),
+      el('span', { class: 'map-pick-name', text: s.name }),
+      el('span', { class: 'map-pick-meta', text: `${alias}［${s.kindLabel}］${fun}${already ? ' · 已经有了' : ''}` }));
     });
+
+    // 摘要：一眼看出「已经勾了哪几处」。没有它，勾没勾全看不出来。
+    const summary = pickedNames.length
+      ? `${t.pickedLabel}${pickedNames.length} 处：${pickedNames.join('、')}`
+      : t.pickedNone;
 
     const countLabel = el('span', { text: `${t.addSubmit}（${picked.size} 处）` });
     const submit = el('button', {
@@ -508,6 +558,8 @@ function mountPlaces(ctx) {
       el('div', { class: 'map-picker-head' },
         el('strong', { text: `${t.pickTitle}：${t2.label}` }),
         el('span', { class: 'map-dim', text: t2.note })),
+      // 摘要放在列表**上面**：先说「现在勾了哪几处」，再看清单。
+      el('div', { class: pickedNames.length ? 'map-picked map-picked-on' : 'map-picked', text: summary }),
       el('div', { class: 'map-pick-list' }, rows),
       el('div', { class: 'map-actions' },
         submit,
@@ -877,6 +929,23 @@ function mountPlaces(ctx) {
       state.data = d;
       // 展开着的那一处如果被删了，收起详情。
       if (state.expanded && !d.places.some((p) => p.id === state.expanded)) state.expanded = null;
+
+      // 勾选状态要跟着数据走：删掉一处之后它又变回「可以再加」，
+      // 而旧的 picked 里可能还留着一个已经不存在的 id（或者反过来）。
+      // 不重新对齐的话，勾选表会出现「勾了不生效 / 按钮莫名灰着」的假死。
+      if (state.picked) {
+        const terrain = d.terrains.find((x) => x.id === state.pickedFor);
+        if (!terrain || !Array.isArray(terrain.skeletons)) {
+          state.picked = null;
+          state.pickedFor = '';
+        } else {
+          const pending = new Set(terrain.skeletons.filter((s) => !s.exists).map((s) => s.id));
+          for (const id of [...state.picked]) if (!pending.has(id)) state.picked.delete(id);
+        }
+      }
+      // 勾选表指向的那套地形要是没了，也收起来。
+      if (state.terrainPick && !d.terrains.some((x) => x.id === state.terrainPick)) state.terrainPick = '';
+
       render();
     } catch (err) {
       root.replaceChildren();
