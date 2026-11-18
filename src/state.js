@@ -21,7 +21,7 @@
  */
 
 import {
-  KINDS, findPlace, hasFunVenue, hasScene, normalizeKind, normalizePlace, slugFor, terrainPlaces,
+  KINDS, findPlaceCandidates, hasFunVenue, hasScene, normalizeKind, normalizePlace, slugFor, terrainPlaces,
 } from './places.js';
 
 export const STATE_VERSION = 1;
@@ -55,12 +55,17 @@ export function normalizeState(raw) {
     if (seen.has(p.id)) continue;
     seen.add(p.id);
     places.push(p);
-    if (places.length >= MAX_PLACES) break;
+    // 旧版本可能已超限：保留有效地点，容量限制只在新增入口执行，避免重启丢数据。
+  }
+  const placeIds = new Set(places.map((p) => p.id));
+  for (const place of places) {
+    place.relations = place.relations.filter((relation) => placeIds.has(relation.placeId));
   }
   return {
     version: STATE_VERSION,
     terrain,
     places,
+    ...(places.some((p) => p.id === raw.homeId && p.kind === 'home') ? { homeId: raw.homeId } : {}),
     updatedAt: Number.isFinite(Number(raw.updatedAt)) ? Number(raw.updatedAt) : 0,
   };
 }
@@ -123,6 +128,7 @@ export function addPlace(state, input = {}, nowMs = 0) {
     id: slugFor(name, state.places),
     name,
     aliases: input.aliases,
+    tags: input.tags,
     kind: input.kind,
     desc: input.desc,
     style: input.style,
@@ -167,6 +173,10 @@ export function editPlace(state, id, patch = {}, nowMs = 0) {
     const aliases = normalizePlace({ ...place, aliases: patch.aliases }).aliases;
     setIf('aliases', aliases);
   }
+  if (patch.tags !== undefined) {
+    const tags = normalizePlace({ ...place, tags: patch.tags }).tags;
+    if (JSON.stringify(place.tags ?? []) !== JSON.stringify(tags)) setIf('tags', tags);
+  }
   if (patch.kind !== undefined) {
     const kind = normalizeKind(patch.kind);
     if (kind) setIf('kind', kind);
@@ -176,6 +186,13 @@ export function editPlace(state, id, patch = {}, nowMs = 0) {
   if (patch.scene !== undefined) setIf('scene', text(patch.scene, 40));
   if (patch.funVenue !== undefined) setIf('funVenue', text(patch.funVenue, 40));
   if (patch.frequent !== undefined) setIf('frequent', patch.frequent === true);
+  if (patch.relations !== undefined) {
+    const relations = normalizePlace({ ...place, relations: patch.relations }).relations.filter((relation) => state.places.some((target) => target.id === relation.placeId));
+    if (JSON.stringify(place.relations) !== JSON.stringify(relations)) {
+      place.relations = relations;
+      changed.push('relations');
+    }
+  }
   state.updatedAt = Number(nowMs) || 0;
   return { place, changed, error: '' };
 }
@@ -210,6 +227,8 @@ export function removePlace(state, id, nowMs = 0) {
   const place = placeById(state, id);
   if (!place) return { removed: null, error: `没有这一处（${text(id, 40) || '空'}）` };
   state.places = state.places.filter((p) => p !== place);
+  for (const remaining of state.places) remaining.relations = (remaining.relations ?? []).filter((relation) => relation.placeId !== place.id);
+  if (state.homeId === place.id) state.homeId = '';
   state.updatedAt = Number(nowMs) || 0;
   return { removed: place, error: '' };
 }
@@ -241,12 +260,13 @@ export function applyTerrain(state, terrainId, nowMs = 0) {
  * @param {string} terrainId 地形 id（或中文标签）
  * @param {string[]|null} wantedIds 只加这些骨架 id；null/undefined = 全加
  * @param {number} nowMs
+ * @param {{withDescriptions?: boolean}} options 为新地点启用示例描写；已有地点不变
  * @returns {{added: object[], terrain: string, skipped: string[], error: string}}
  */
-export function applyTerrainSelection(state, terrainId, wantedIds = null, nowMs = 0) {
+export function applyTerrainSelection(state, terrainId, wantedIds = null, nowMs = 0, options = {}) {
   const empty = { added: [], terrain: '', skipped: [], error: '' };
   if (!state || !Array.isArray(state.places)) return { ...empty, error: '状态还没准备好' };
-  const skeletons = terrainPlaces(terrainId);
+  const skeletons = terrainPlaces(terrainId, options);
   if (!skeletons.length) return { ...empty, error: `没有「${text(terrainId, 20)}」这套地形` };
 
   const wanted = Array.isArray(wantedIds) ? new Set(wantedIds.filter((x) => typeof x === 'string')) : null;
@@ -256,10 +276,17 @@ export function applyTerrainSelection(state, terrainId, wantedIds = null, nowMs 
   for (const p of skeletons) {
     if (wanted && !wanted.has(p.id)) continue;
     if (taken.has(p.id)) { skipped.push(p.id); continue; }
-    state.places.push(p);
     taken.add(p.id);
     added.push(p);
   }
+  const available = Math.max(0, MAX_PLACES - state.places.length);
+  if (added.length > available) {
+    return {
+      added: [], terrain: state.terrain, skipped,
+      error: `地点最多 ${MAX_PLACES} 处，当前已有 ${state.places.length} 处，剩余 ${available} 处容量；本次需新增 ${added.length} 处，整次未添加，请减少勾选或先删除地点`,
+    };
+  }
+  state.places.push(...added);
   // 一条都没选（勾选表被全不选）时不动地形——「我还没决定」不等于「我选了这套」。
   if (added.length || !wanted || wanted.size) {
     state.terrain = skeletons[0].terrain;
@@ -274,7 +301,19 @@ export function applyTerrainSelection(state, terrainId, wantedIds = null, nowMs 
  * 明确把 `hasScene` / `hasFunVenue` 算好给出去：面板要显示「生图时 scene 填「X」」
  * 还是「库里没有这处，scene 不用填」，判据只有这一个函数，不各写一份。
  */
-export function placeView(place) {
+export function placeCompleteness(place, state) {
+  const incoming = new Set((state?.places ?? []).flatMap((item) => (item.relations ?? []).filter((r) => r.placeId === place?.id).map(() => item.id)));
+  const hasRelation = (place?.relations ?? []).length > 0 || incoming.size > 0;
+  return {
+    missingDesc: !text(place?.desc, 400),
+    missingCover: !text(place?.cover, 160),
+    orphan: !hasRelation,
+    missingRelationTarget: Array.isArray(state?.places)
+      && (place?.relations ?? []).some((r) => !state.places.some((target) => target.id === r.placeId)),
+  };
+}
+
+export function placeView(place, state) {
   if (!place) return null;
   return {
     id: place.id,
@@ -292,6 +331,9 @@ export function placeView(place) {
     hasFunVenue: hasFunVenue(place),
     frequent: place.frequent,
     terrain: place.terrain,
+    tags: [...(place.tags ?? [])],
+    completeness: placeCompleteness(place, state),
+    relations: (place.relations ?? []).map((relation) => ({ ...relation })),
   };
 }
 
@@ -316,7 +358,19 @@ export function summaryOf(state) {
   };
 }
 
-/** 按名字或 id 找（工具入参用）——`map_look` / `map_edit` 都走这一条。 */
+/** 按 id、名字或别名返回候选，供工具回执请求用户澄清。 */
+export function resolvePlaceCandidates(state, name) {
+  const exactId = placeById(state, name);
+  if (exactId) return [exactId];
+  if (['家', '家里', '回家'].includes(typeof name === 'string' ? name.trim() : '')) {
+    const home = placeById(state, state?.homeId);
+    if (home?.kind === 'home') return [home];
+  }
+  return findPlaceCandidates(state?.places, name);
+}
+
+/** 按名字或 id 找（工具入参用）；歧义返回 null，调用方可另取候选。 */
 export function resolvePlace(state, name) {
-  return placeById(state, name) ?? findPlace(state?.places, name);
+  const candidates = resolvePlaceCandidates(state, name);
+  return candidates.length === 1 ? candidates[0] : null;
 }

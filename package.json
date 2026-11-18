@@ -1,6 +1,6 @@
 {
   "name": "cortico-world-map",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "type": "module",
   "description": "鱼的小世界 —— 给 Coo 桌宠一张「周围的地图」：家、常去的、附近的。每处地方只有文字描写（空间、陈设、配色、光线、氛围）和一句固定的画风锚点，画面可以完全靠主人自己上传一张本地图；装了「生图工作室」也只是「可以」联动出图，没装照样完整可用。**没有路线、没有坐标、没有距离、没有导航**——它只说「这个地方长什么样」，不画「从这儿怎么走到那儿」。",
   "license": "MIT",
@@ -39,12 +39,12 @@
     "PUBLISHING.md"
   ],
   "scripts": {
-    "test": "node test/places.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/panels.test.mjs",
+    "test": "node test/places.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/transfer.test.mjs && node test/panels.test.mjs",
     "verify": "node tools/fix-ps1-bom.mjs install.ps1 && node tools/check-name.mjs && node tools/check-prompt.mjs && node tools/check-isolation.mjs && node tools/smoke.mjs && node tools/make-describe.mjs --check",
     "describe": "node tools/make-describe.mjs",
     "check:isolation": "node tools/check-isolation.mjs",
     "check:name": "node tools/check-name.mjs",
-    "prepublishOnly": "node test/places.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/panels.test.mjs && node tools/check-name.mjs && node tools/check-prompt.mjs && node tools/check-isolation.mjs && node tools/smoke.mjs && node tools/make-describe.mjs --check"
+    "prepublishOnly": "node test/places.test.mjs && node test/state.test.mjs && node test/world.test.mjs && node test/transfer.test.mjs && node test/panels.test.mjs && node tools/check-name.mjs && node tools/check-prompt.mjs && node tools/check-isolation.mjs && node tools/smoke.mjs && node tools/make-describe.mjs --check"
   },
   "cortico": {
     "kind": "world",

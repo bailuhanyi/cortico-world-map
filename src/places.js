@@ -50,7 +50,7 @@ export function normalizeKind(kind) {
 /**
  * 预设地形（方案 §3「选择：预设，开箱即有『周围』」）。
  *
- * 四套，每套 5 个**空 `desc`** 的地点骨架——主人只改文字、传图，不填坐标。
+ * 五套，每套 5 个地点；默认生成空 `desc` 骨架，也可显式选用示例描写。
  * `style` / `scene` 也留空：骨架不知道主人喜欢什么画风、也不知道素材库里有什么场景，
  * 猜一个反而是错的。
  */
@@ -161,6 +161,41 @@ function textList(v, maxItems, maxLen) {
   return out;
 }
 
+// Keep relationships descriptive; reject actionable route, measurement, and compass details.
+const RELATION_RESTRICTED = /路线|导航|坐标|左转|右转|距离|路程|公里|千米|几分钟|[\d一二三四五六七八九十百几]+\s*(?:米|分钟|小时)|(?:向|往|朝|正)[东西南北]|[东西南北](?:侧|面|边|方)|(?:左|右)(?:侧|边|面)|\b(?:routes?|navigation|coordinates?|distance|east|west|north|south)\b/i;
+
+/** 标签只收纯文本；先检查完整输入，避免截断把红线内容藏在尾部。 */
+export function normalizeTags(value) {
+  const out = [];
+  for (const item of Array.isArray(value) ? value : []) {
+    if (typeof item !== 'string') continue;
+    const full = item.replace(/\s+/g, ' ').trim();
+    if (!full || /[<>\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/u.test(full)
+      || RELATION_RESTRICTED.test(full)) continue;
+    const tag = Array.from(full).slice(0, 24).join('').trim();
+    if (out.includes(tag)) continue;
+    out.push(tag);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function normalizeRelations(value, selfId) {
+  const out = [];
+  const seen = new Set();
+  for (const item of Array.isArray(value) ? value : []) {
+    if (!item || typeof item !== 'object') continue;
+    const placeId = typeof item.placeId === 'string' ? item.placeId.trim() : '';
+    const fullNote = typeof item.note === 'string' ? item.note.replace(/\s+/g, ' ').trim() : '';
+    const note = fullNote.slice(0, 80);
+    if (!isSafeId(placeId) || placeId === selfId || seen.has(placeId) || !note || RELATION_RESTRICTED.test(fullNote)) continue;
+    seen.add(placeId);
+    out.push({ placeId, note });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
 /**
  * `id` 只许这些字符。
  *
@@ -178,7 +213,7 @@ export function isSafeId(id) {
 /**
  * 把一条 place 归一化成当前形状（不信任磁盘内容）。
  *
- * 只产下面这**十一个**字段——**多余字段一律丢掉**，geo 字段当然也丢。
+ * 只产下面列出的字段（含描述标签和关系）——**多余字段一律丢掉**，geo 字段当然也丢。
  * 这样老状态里混进来的 `lat` / `lng` / `route` 不会活到下一次落盘。
  *
  * （比方案 §3 的十个多了 `funVenue`：2026-11-15 加旅游预设时新增，
@@ -197,6 +232,7 @@ export function normalizePlace(raw, fallbackTerrain = '') {
     id,
     name,
     aliases: textList(raw.aliases, 8, 30).filter((a) => a !== name),
+    tags: normalizeTags(raw.tags),
     kind,
     desc: text(raw.desc, 400),
     style: text(raw.style, 160),
@@ -205,6 +241,7 @@ export function normalizePlace(raw, fallbackTerrain = '') {
     funVenue: text(raw.funVenue, 40),
     frequent: raw.frequent === true,
     terrain,
+    relations: normalizeRelations(raw.relations, id),
   };
 }
 
@@ -240,13 +277,43 @@ export function hasFunVenue(place) {
   return typeof place?.funVenue === 'string' && place.funVenue.trim() !== '';
 }
 
+/** 仅描写空间、陈设、配色和氛围；不预设人物或事件。 */
+const TERRAIN_DESCRIPTIONS = Object.freeze({
+  'forest-home': '圆拱木窗映着苔绿色墙面，矮桌和棉麻软垫围出温暖安静的小屋。',
+  'forest-old-oak': '粗厚树干覆着灰绿苔藓，盘根间铺满褐色落叶，树冠下光影柔和。',
+  'forest-creek': '浅青溪水映着碎银般的光，圆润卵石和深绿蕨叶构成清凉幽静的景致。',
+  'forest-mushroom-slope': '赭褐土坡缀着乳白与砖红的菌伞，松针厚软，微湿的林色朦胧柔和。',
+  'forest-clearing': '浅绿草地被浓密树冠围合，几截原木与细碎白花相衬，空气明净安宁。',
+  'neighborhood-home': '奶油白墙面配浅木书柜，布艺沙发和暖黄台灯让客厅显得柔软舒适。',
+  'neighborhood-bench': '深棕长椅嵌在灰砖庭院里，花盆和常绿灌木点出朴素安静的生活气息。',
+  'neighborhood-store-front': '玻璃橱窗透着暖白灯光，蓝白遮棚下摆着整齐货架，门前明亮亲切。',
+  'neighborhood-garden': '红砖花坛盛着粉白小花，墨绿矮篱围出整洁庭院，碎石铺面清爽宁静。',
+  'neighborhood-stairwell': '米灰墙面衬着深绿扶手，磨石台阶和方形窗格保留着朴素沉静的质感。',
+  'riverside-home': '浅蓝窗帘映着水色，藤椅与白木小桌相配，室内通透而清静。',
+  'riverside-levee-steps': '青灰石阶带着细密水痕，栏杆呈暗铁色，开阔水面铺着淡银光泽。',
+  'riverside-old-pier': '旧木平台呈烟褐色，粗绳与生锈铁环留着岁月纹理，水光沉静柔暗。',
+  'riverside-reeds': '浅金芦苇簇成疏密有致的屏障，湿润滩石泛着灰白色，水面柔和朦胧。',
+  'riverside-bollard': '圆钝石墩覆着浅灰斑驳纹理，麻绳盘在石面，蓝灰江水衬出清寂气氛。',
+  'foothill-home': '石墙与深色木梁围出小屋，陶罐和格纹毯点缀其间，暖褐色调质朴安稳。',
+  'foothill-trailhead': '苍绿山石与低矮灌木围出开阔缺口，木牌带着旧褐纹理，景致清朗沉静。',
+  'foothill-spring': '清透泉池嵌在灰白岩壁间，翠绿苔痕与细小水纹相衬，氛围清凉澄净。',
+  'foothill-pavilion': '暗红亭柱托着青灰瓦檐，石桌与木凳陈设简洁，疏淡山色带来安静空阔感。',
+  'foothill-scree': '银灰碎石铺成粗粝坡面，赭色岩块和稀疏草簇相间，色调干净冷静。',
+  'travel-seaside-town': '白墙小屋配海蓝窗框，露台摆着陶盆与藤椅，明亮天光让街巷清新松弛。',
+  'travel-snow-inn': '深木护墙衬着乳白厚毯，铸铁壁炉与琥珀色灯罩令客栈温暖沉静。',
+  'travel-old-town': '灰砖院墙围着青石铺地，旧木铺面挂着暗红灯笼，古朴色调柔和安静。',
+  'travel-hot-spring': '浅木隔屏与灰石浴池相映，乳白蒸汽笼着暖黄灯光，空间柔润静谧。',
+  'travel-camp': '米白帐篷围出疏朗营地，折叠木桌和珐琅杯陈设简洁，墨绿林色宁静柔和。',
+});
+
 /**
  * 一套地形要建的地点（初始化时只建一套；换地形只追加不删）。
  *
- * 返回的是**骨架**：`desc` / `style` / `scene` / `cover` 全空，`frequent` 为 false。
+ * 默认返回空描写骨架；`{ withDescriptions: true }` 显式启用示例描写。
+ * `style` / `scene` / `cover` 始终为空，`frequent` 为 false。
  * id 带地形前缀（`forest-home`），这样换地形追加时不会和上一套的 `home` 撞 id。
  */
-export function terrainPlaces(terrainId) {
+export function terrainPlaces(terrainId, options = {}) {
   const terrain = findTerrain(terrainId);
   if (!terrain) return [];
   return terrain.places.map((p) => normalizePlace({
@@ -254,7 +321,7 @@ export function terrainPlaces(terrainId) {
     name: p.name,
     aliases: p.aliases,
     kind: p.kind,
-    desc: '',
+    desc: options?.withDescriptions === true ? TERRAIN_DESCRIPTIONS[`${terrain.id}-${p.slug}`] : '',
     style: '',
     cover: '',
     scene: '',
@@ -262,29 +329,35 @@ export function terrainPlaces(terrainId) {
     funVenue: p.funVenue ?? '',
     frequent: false,
     terrain: terrain.id,
+    relations: [],
   }));
 }
 
 /**
- * 在一个地点列表里找一个地方：正名 > 别名 > id > 唯一包含。
- * 找不到返回 null（她随口说个地方，不该炸）。
+ * 返回匹配候选，保持列表原序：明确 id > 正名或别名精确命中 > 包含匹配。
+ * 正名与别名指向不同地点时同样需要澄清；调用方可展示候选的 id、名字和地形。
+ * 返回原地点引用，不修改列表。空输入 / 无匹配返回 []。
  */
-export function findPlace(places, name) {
+export function findPlaceCandidates(places, name) {
   const n = text(name, 60);
-  const list = Array.isArray(places) ? places : [];
-  if (!n) return null;
-  let hit = list.find((p) => p.name === n);
-  if (hit) return hit;
-  hit = list.find((p) => p.id === n);
-  if (hit) return hit;
-  hit = list.find((p) => p.aliases.includes(n));
-  if (hit) return hit;
+  const list = Array.isArray(places) ? places.filter((p) => p && typeof p.name === 'string') : [];
+  if (!n) return [];
+  const ids = list.filter((p) => p.id === n);
+  if (ids.length) return ids;
+  const aliasesOf = (p) => (Array.isArray(p.aliases) ? p.aliases : []).filter((a) => typeof a === 'string');
+  const exact = list.filter((p) => p.name === n || aliasesOf(p).includes(n));
+  if (exact.length) return exact;
   const lower = n.toLowerCase();
-  const contains = list.filter((p) => p.name.includes(n)
-    || p.aliases.some((a) => a.includes(n))
-    || n.includes(p.name)
-    || p.id.toLowerCase() === lower);
-  return contains.length === 1 ? contains[0] : null;
+  return list.filter((p) => p.name.includes(n)
+    || aliasesOf(p).some((a) => a.includes(n))
+    || (p.name && n.includes(p.name))
+    || (typeof p.id === 'string' && p.id.toLowerCase() === lower));
+}
+
+/** 仅唯一候选才返回地点；无匹配或有歧义均返回 null。 */
+export function findPlace(places, name) {
+  const candidates = findPlaceCandidates(places, name);
+  return candidates.length === 1 ? candidates[0] : null;
 }
 
 /** 从 `name` 起一个不撞的 id（加地点时用；纯函数，靠传入的 existing 判重）。 */

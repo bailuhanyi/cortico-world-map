@@ -125,11 +125,11 @@ ok(pick.added.length === 5, `林间建了 5 处，实际 ${pick.added.length}`);
 const sel = await ui.invoke('places', 'terrain', [{ id: 'riverside', ids: ['riverside-home', 'riverside-old-pier'] }]);
 ok(sel.ok === true && sel.added.length === 2, `勾选只加 2 处，实际 ${sel.added?.length}`);
 const afterSel = await tool('map_places')({});
-ok(/周围一共 7 处地方/.test(afterSel.text), `5+2=7 处，实际：${afterSel.text.slice(0, 30)}`);
+ok(/地点共 7 处，匹配 7 处/.test(afterSel.text), `5+2=7 处，实际：${afterSel.text.slice(0, 30)}`);
 ok(!/芦苇滩/.test(afterSel.text), '没勾的那处不该出现');
 
 const places = await tool('map_places')({});
-ok(/周围一共 7 处地方/.test(places.text), `map_places 有正文：${places.text.slice(0, 40)}`);
+ok(/地点共 7 处，匹配 7 处/.test(places.text), `map_places 有正文：${places.text.slice(0, 40)}`);
 
 const look = await tool('map_look')({ place: '溪边' });
 ok(/溪边/.test(look.text), 'map_look 认得溪边');
@@ -162,7 +162,7 @@ ok(!/路线|坐标|导航|公里/.test(view.text), 'map_view 不带路线字眼'
 
 // 内联提示词：有地点之后该有清单，但仍然不提生图
 const vars2 = world.envPromptVars();
-ok(vars2.map_places_block.includes('溪边'), '有地点之后注入清单');
+ok(vars2.map_places_block.includes('当前住所') || vars2.map_places_block.includes('常去地点索引'), '有地点之后注入精简索引');
 ok(vars2.map_imggen_block === '', '没装生图时仍然不注入发图那句');
 ok(!/imggen_draw/.test(vars2.map_places_block), '清单里不出现 imggen_draw');
 

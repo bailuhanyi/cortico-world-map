@@ -74,7 +74,7 @@ for (const f of files) {
 }
 
 console.log('3) 只 import node: 内置或本包内的文件');
-const ALLOWED = new Set(['node:fs', 'node:fs/promises', 'node:path', 'node:url', 'node:zlib', 'node:os']);
+const ALLOWED = new Set(['node:fs', 'node:fs/promises', 'node:path', 'node:url', 'node:zlib', 'node:os', 'node:crypto']);
 for (const f of files) {
   if (!/\.(js|mjs)$/.test(f)) continue;
   const code = stripComments(readFileSync(f, 'utf8'));

@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 
 import { test, report } from './harness.mjs';
 import {
-  KIND_LABEL, KINDS, TERRAINS, coverName, findPlace, findTerrain, hasFunVenue, hasScene, isSafeId,
+  KIND_LABEL, KINDS, TERRAINS, coverName, findPlace, findPlaceCandidates, findTerrain, hasFunVenue, hasScene, isSafeId,
   isTerrain, normalizeKind, normalizePlace, slugFor, terrainPlaces,
 } from '../src/places.js';
 
@@ -105,9 +105,9 @@ test('守门断言：place 不含任何 geo 字段（不带路线/坐标/距离/
   assert.equal(dirty.desc, '一条很浅的溪', '该留的字段要留着');
 });
 
-test('守门断言：归一化后的 place 字段集合就是那十一个', () => {
+test('守门断言：归一化后的 place 字段集合包含标签和关系', () => {
   const EXPECTED = [
-    'id', 'name', 'aliases', 'kind', 'desc', 'style', 'cover', 'scene', 'funVenue', 'frequent', 'terrain',
+    'id', 'name', 'aliases', 'kind', 'desc', 'style', 'cover', 'scene', 'funVenue', 'frequent', 'terrain', 'relations', 'tags',
   ];
   for (const p of ALL_SKELETONS) {
     assert.deepEqual(Object.keys(p).sort(), [...EXPECTED].sort(), `${p.id} 的字段集合漂了`);
@@ -136,6 +136,39 @@ test('normalizePlace：认不出的 kind 落 around，脏别名去重去空', ()
   assert.deepEqual(p.aliases, ['甲', '乙'], '别名要去重、去空、去和正名重复的');
   assert.equal(normalizePlace({ id: 'x', name: '测试处', aliases: ['测试处'] }).aliases.length, 0,
     '别名等于正名时该被丢掉');
+});
+
+test('normalizePlace：relations 只留安全、非自身、唯一且合规的目标，最多八条', () => {
+  const input = [
+    { placeId: 'valid-1', note: '窗外能看见' },
+    { placeId: '../bad', note: '旁边' },
+    { placeId: 'self', note: '属于这里' },
+    { placeId: 'valid-1', note: '相邻' },
+    {},
+    { placeId: 'valid-2', note: '向东有路' },
+    { placeId: 'valid-3', note: '距离很近' },
+    { placeId: 'valid-4', note: 'route to it' },
+    { placeId: 'valid-5', note: 'north of here' },
+    { placeId: 'valid-6', note: 'east of here' },
+    ...Array.from({ length: 10 }, (_, i) => ({ placeId: `target-${i}`, note: '旁边' })),
+  ];
+  const place = normalizePlace({ id: 'self', name: '测试处', relations: input });
+  assert.deepEqual(place.relations, [
+    { placeId: 'valid-1', note: '窗外能看见' },
+    { placeId: 'target-0', note: '旁边' }, { placeId: 'target-1', note: '旁边' },
+    { placeId: 'target-2', note: '旁边' }, { placeId: 'target-3', note: '旁边' },
+    { placeId: 'target-4', note: '旁边' }, { placeId: 'target-5', note: '旁边' },
+    { placeId: 'target-6', note: '旁边' },
+  ]);
+  assert.deepEqual(normalizePlace({ id: 'empty', name: '空' }).relations, []);
+  assert.equal(normalizePlace({ id: 'long', name: '长', relations: [{ placeId: 'other', note: '相'.repeat(90) }] }).relations[0].note.length, 80);
+});
+
+test('normalizePlace：tags 最多八个、收敛去重并过滤关系红线', () => {
+  const p = normalizePlace({ id: 'tags', name: '标签处', tags: ['  安静   夜晚 ', '安静 夜晚', '路线', '向东', '<bad>', 'x'.repeat(30), '普通'] });
+  assert.deepEqual(p.tags, ['安静 夜晚', 'xxxxxxxxxxxxxxxxxxxxxxxx', '普通']);
+  assert.equal(normalizePlace({ id: 'old', name: '旧数据' }).tags.length, 0);
+  assert.ok(normalizePlace({ id: 'long', name: '长', tags: ['好'.repeat(30)] }).tags[0].length <= 24);
 });
 
 test('normalizePlace：没 id 或没名字就丢掉（不抛错）', () => {
@@ -201,7 +234,7 @@ test('守门断言：id 会被拼进图片文件名，所以不安全的一律�
   }
 });
 
-test('findPlace：正名 > 别名 > id > 唯一包含；歧义回 null', () => {
+test('findPlace：支持正名、别名、id 和唯一包含；歧义回 null', () => {
   const places = terrainPlaces('forest');
   assert.equal(findPlace(places, '溪边')?.name, '溪边');
   assert.equal(findPlace(places, '小溪')?.name, '溪边', '别名该认');
@@ -248,6 +281,57 @@ test('KIND_LABEL / KINDS 四档齐全（含行）', () => {
 test('五套地形的 label 就是那五个', () => {
   assert.deepEqual(TERRAINS.map((t) => t.label), ['林间', '小区', '江边', '山脚', '旅行']);
   assert.deepEqual(TERRAINS.map((t) => t.id), ['forest', 'neighborhood', 'riverside', 'foothill', 'travel']);
+});
+
+test('findPlaceCandidates：同名、同别名、正名与别名碰撞均返回全部候选', () => {
+  const places = [
+    normalizePlace({ id: 'one', name: '家', aliases: ['屋里', '共同别名'] }),
+    normalizePlace({ id: 'two', name: '家', aliases: ['屋里', '共同别名'] }),
+    normalizePlace({ id: 'three', name: '共同别名' }),
+  ];
+  for (const query of ['家', '屋里', '共同别名']) {
+    assert.equal(findPlace(places, query), null);
+  }
+  assert.deepEqual(findPlaceCandidates(places, '家'), places.slice(0, 2));
+  assert.deepEqual(findPlaceCandidates(places, '共同别名'), places);
+  assert.deepEqual(findPlaceCandidates(places, '共同'), places);
+  assert.deepEqual(findPlaceCandidates(places, '火星'), []);
+  assert.deepEqual(findPlaceCandidates(places, ''), []);
+  assert.deepEqual(findPlaceCandidates(null, '家'), []);
+});
+
+test('findPlace：明确 id 优于其他地点的正名与别名，歧义不依赖列表顺序', () => {
+  const places = [
+    normalizePlace({ id: 'one', name: '甲', aliases: ['共同'] }),
+    normalizePlace({ id: 'two', name: 'one', aliases: ['共同'] }),
+    normalizePlace({ id: 'three', name: '丙', aliases: ['one'] }),
+  ];
+  for (const list of [places, [...places].reverse()]) {
+    assert.equal(findPlace(list, 'one'), places[0]);
+    assert.deepEqual(findPlaceCandidates(list, 'one'), [places[0]]);
+    assert.equal(findPlace(list, '共同'), null);
+  }
+});
+
+test('terrainPlaces：显式启用25处示例描写，默认空白兼容且只改变desc', () => {
+  const all = TERRAINS.flatMap((t) => terrainPlaces(t.id, { withDescriptions: true }));
+  assert.equal(all.length, 25);
+  assert.equal(new Set(all.map((p) => p.desc)).size, 25);
+  for (const t of TERRAINS) {
+    const described = terrainPlaces(t.label, { withDescriptions: true });
+    const defaults = terrainPlaces(t.id);
+    for (let i = 0; i < described.length; i += 1) {
+      const p = described[i];
+      assert.ok(p.desc.length >= 15 && p.desc.length <= 100, `${p.id} 描写应简短且非空`);
+      assert.ok(!GEO_WORDS.test(p.desc), `${p.id} 不应含路线距离坐标`);
+      assert.ok(!/\d|人物|主人|我们|他们|走向|跑到|走过|坐下|站起|步行|乘车/.test(p.desc), `${p.id} 不应预置人物动作或数字`);
+      assert.deepEqual({ ...p, desc: '' }, defaults[i], '启用示例只改变desc');
+    }
+    described[0].desc = '调用方改动';
+    assert.notEqual(terrainPlaces(t.id, { withDescriptions: true })[0].desc, '调用方改动');
+    assert.deepEqual(terrainPlaces(t.id, { withDescriptions: false }), defaults);
+  }
+  assert.deepEqual(terrainPlaces('火星', { withDescriptions: true }), []);
 });
 
 await report();

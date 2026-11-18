@@ -1,6 +1,6 @@
 # 发布清单（cortico-world-map）
 
-> 这一版 **0.1.0**，还没发。发布由主人自己在 PowerShell 里敲（`npm publish` 要真 TTY + 6 位 OTP，agent 做不了）。
+> 这一版 **0.2.1**，本地准备中，尚未发布。发布由主人自己在 PowerShell 里敲（`npm publish` 要真 TTY + 6 位 OTP，agent 做不了）。
 
 ## 发之前
 
@@ -11,6 +11,7 @@ cd "E:\deep seek\map-world"
 node test/places.test.mjs
 node test/state.test.mjs
 node test/world.test.mjs
+node test/transfer.test.mjs
 node test/panels.test.mjs
 
 # 2) 单独跑的自检
@@ -43,8 +44,8 @@ npm publish --otp 123456    # 换成你手机上的码
 ## 发之后验
 
 ```powershell
-npm view cortico-world-map version        # 应回 0.1.0
-npm view cortico-world-map dist-tags      # latest 应是 0.1.0
+npm view cortico-world-map version        # 应回 0.2.1
+npm view cortico-world-map dist-tags      # 发布成功后 latest 应是 0.2.1
 ```
 
 想让它进市场，开一个 `[同步] cortico-world-map` issue。
@@ -55,13 +56,15 @@ npm view cortico-world-map dist-tags      # latest 应是 0.1.0
    - 以后再改，三处一起改，缺一处界面与包里就对不上：`src/config.js` 的 `LABEL`、`package.json` 的 `cortico.displayName` + `locales.*.displayName`、`dist/webui.js` 里 `T.zh` / `T.en` 的 `title`。
    - `node tools/check-name.mjs` 会把不一致当场抓出来（也已进 `verify` 和 `prepublishOnly`）。
    - **英文名别带撇号**——`Fish's ...` 那次炸过 JS 单引号字符串，`node --check` 直接 `SyntaxError`。
-2. **`mapStyleRef` 要不要真实现**（整图一张样式参考当所有地点出图的风格基准）。现在只有字段，不影响任何回执。
+2. **确认画风语义**：`mapStyleRef` 从 0.3.0 起为世界默认文字画风，地点画风优先；不接受参考图片、不修改已有封面。
 
 **`worlds.map` 段名不能改**：world id 必须是 `map`——「鱼的每一天」那边的 `maplink`（归另一个会话）只读 `worlds.map.enabled` 这一个字段。改了名就断了那条契约。
 
 ## 版本号
 
-**当前 `0.1.1`**（0.1.0 已发布；0.1.1 是面板可用性修复，无数据格式变化，从 0.1.0 升上来不用迁移）。
+**当前 `0.2.1`**：基于已发布的 0.2.0，增加“合并更新（仅已有地点）”导入模式；同 id 同名地点只补空白，已有文字、标签、关系、图片和常去状态保留，不新增地点、不切换住所；冲突提示保留本地，确认绑定预览的文件、模式和状态。预览支持逐项勾选与逐项处理方式（跳过 / 合并 / 覆盖），确认提交的是预览时那份 `decisions`；成功导入后保留最近一次导入前的快照，可先预览影响再确认恢复，导入后被改过则拒绝恢复。数据格式兼容 version 1，无需迁移；草稿位于 `map/drafts.json`，地点保存继续备份到 `state.json.bak`，导入恢复点位于 `map/import-recovery.json`（只是回退用的快照，不参与正常读取）。
+
+测试共 **220 项**（places 24 · state 47 · world 79 · transfer 14 · panels 56）。
 
 改版本号要同时改：
 

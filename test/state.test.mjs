@@ -11,9 +11,9 @@ import assert from 'node:assert/strict';
 
 import { test, report } from './harness.mjs';
 import {
-  MAX_ALIASES, MAX_PLACES, addPlace, applyTerrain, applyTerrainSelection, editPlace, kindLabelOf,
+  MAX_ALIASES, MAX_PLACES, addPlace, applyTerrain, applyTerrainSelection, editPlace, kindLabelOf, placeCompleteness,
   listPlaces, newState, normalizeKind, normalizeState, placeById, placeView, removePlace,
-  resolvePlace, setCover, summaryOf,
+  resolvePlace, resolvePlaceCandidates, setCover, summaryOf,
 } from '../src/state.js';
 import { terrainPlaces } from '../src/places.js';
 
@@ -55,6 +55,17 @@ test('normalizeState：没 id/没名字的丢掉，重复 id 只留一条', () =
   });
   assert.deepEqual(st.places.map((p) => p.id), ['a', 'c']);
   assert.equal(st.places[0].name, '甲', '重复 id 留第一条');
+});
+
+test('normalizeState：第二遍移除目标不存在的关系', () => {
+  const st = normalizeState({ places: [
+    { id: 'a', name: '甲', relations: [{ placeId: 'b', note: '相邻' }, { placeId: 'gone', note: '窗外能看见' }] },
+    { id: 'b', name: '乙', relations: [{ placeId: 'a', note: '相望' }] },
+  ] });
+  assert.deepEqual(st.places[0].relations, [{ placeId: 'b', note: '相邻' }]);
+  assert.deepEqual(st.places[1].relations, [{ placeId: 'a', note: '相望' }]);
+  removePlace(st, 'b');
+  assert.deepEqual(normalizeState(st).places[0].relations, []);
 });
 
 test('normalizeState：落盘状态里不会留下 geo 字段', () => {
@@ -190,6 +201,14 @@ test('addPlace：只填文字就能建一处，id 自动起', () => {
   assert.equal(st.places.length, 1);
 });
 
+test('addPlace / editPlace：支持 tags 且按规则归一化', () => {
+  const st = newState();
+  const added = addPlace(st, { name: '标签处', tags: [' 安静  夜晚 ', '安静 夜晚', '路线', '普通'] });
+  assert.deepEqual(added.place.tags, ['安静 夜晚', '普通']);
+  editPlace(st, added.place.id, { tags: ['新的', '新的', '向东'] });
+  assert.deepEqual(added.place.tags, ['新的']);
+});
+
 test('addPlace：没名字 / 撞正名 / 超上限 都只回 error，不抛错', () => {
   const st = newState();
   assert.ok(addPlace(st, {}, 0).error, '没名字该报错');
@@ -222,6 +241,22 @@ test('editPlace：只改传进来的字段，没传的一个字都不动', () =>
   assert.equal(p.desc, '一条很浅的溪', '第二次只改 frequent，描写不许被冲掉');
   assert.equal(p.style, '水彩，青灰');
   assert.equal(p.frequent, true);
+});
+
+test('editPlace：relations 可 patch，规范化且不会串改其他字段', () => {
+  const st = forestState();
+  const creek = placeById(st, 'forest-creek');
+  editPlace(st, 'forest-creek', { desc: '溪水清浅', style: '青灰' }, 50);
+  const r = editPlace(st, 'forest-creek', {
+    relations: [{ placeId: 'forest-home', note: '旁边' }, { placeId: '../bad', note: '左转' }],
+  }, 60);
+  assert.deepEqual(r.changed, ['relations']);
+  assert.deepEqual(creek.relations, [{ placeId: 'forest-home', note: '旁边' }]);
+  assert.equal(creek.desc, '溪水清浅');
+  assert.equal(creek.style, '青灰');
+  assert.deepEqual(placeById(st, 'forest-home').relations, []);
+  assert.deepEqual(editPlace(st, 'forest-creek', { desc: '只改描写' }, 70).changed, ['desc']);
+  assert.deepEqual(creek.relations, [{ placeId: 'forest-home', note: '旁边' }]);
 });
 
 test('editPlace：改不到 cover（有图就锁死那条）', () => {
@@ -342,6 +377,17 @@ test('summaryOf：数得清总数 / 有图 / 有 scene / 有 funVenue / 常去 /
   });
 });
 
+test('placeCompleteness / placeView：返回非强制内容提示和 tags', () => {
+  const st = newState();
+  const a = addPlace(st, { name: '甲', tags: ['安静'] }).place;
+  const b = addPlace(st, { name: '乙', desc: '有描写' }).place;
+  assert.deepEqual(placeCompleteness(a, st), { missingDesc: true, missingCover: true, orphan: true, missingRelationTarget: false });
+  editPlace(st, a.id, { relations: [{ placeId: b.id, note: '窗外能看见' }] });
+  assert.equal(placeCompleteness(b, st).orphan, false, '仅有入边不应是孤立');
+  assert.equal(placeView(a, st).tags[0], '安静');
+  assert.equal(placeView(a, st).completeness.missingDesc, true);
+});
+
 test('placeView：把 hasScene 算好给出去（面板和回执共用一个判据）', () => {
   const st = forestState();
   const p = placeById(st, 'forest-creek');
@@ -393,6 +439,77 @@ test('terrainPlaces 交给 applyTerrain 时形状不变（骨架没被改坏）'
   applyTerrain(st, 'riverside', 0);
   assert.deepEqual(st.places.map((p) => p.id), before.map((p) => p.id));
   assert.deepEqual(terrainPlaces('riverside').map((p) => p.desc), before.map((p) => p.desc), '骨架是纯函数，不该被调用方改掉');
+});
+
+test('resolvePlace：多套家的正名和别名均需澄清，明确 id 优先', () => {
+  const st = forestState();
+  applyTerrain(st, 'riverside', 20);
+  for (const query of ['家', '屋里']) {
+    assert.equal(resolvePlace(st, query), null);
+    assert.deepEqual(resolvePlaceCandidates(st, query).map((p) => p.id), ['forest-home', 'riverside-home']);
+  }
+  addPlace(st, { name: 'forest-home' });
+  assert.equal(resolvePlace(st, 'forest-home')?.id, 'forest-home');
+  assert.equal(resolvePlaceCandidates(st, 'forest-home').length, 1);
+  assert.deepEqual(resolvePlaceCandidates(st, '不存在'), []);
+});
+
+test('applyTerrainSelection：容量不足整次拒绝，包含地形、时间和引用均不变', () => {
+  const st = forestState();
+  for (let i = st.places.length; i < MAX_PLACES - 1; i += 1) addPlace(st, { name: `自建${i}` }, 17);
+  const before = structuredClone(st);
+  const places = st.places;
+  const r = applyTerrainSelection(st, 'riverside', ['riverside-home', 'riverside-reeds'], 99, { withDescriptions: true });
+  assert.deepEqual(r.added, []);
+  assert.match(r.error, /最多 60 处.*剩余 1 处.*新增 2 处.*整次未添加/);
+  assert.equal(r.terrain, 'forest');
+  assert.deepEqual(st, before);
+  assert.equal(st.places, places);
+});
+
+test('applyTerrainSelection：只计算净新增，刚好60可成功，之后加地点被拒绝且重载不丢', () => {
+  const st = forestState();
+  for (let i = st.places.length; i < MAX_PLACES - 1; i += 1) addPlace(st, { name: `自建${i}` });
+  removePlace(st, 'forest-creek');
+  addPlace(st, { name: '另一处' });
+  const r = applyTerrainSelection(st, 'forest', ['forest-home', 'forest-creek'], 33);
+  assert.equal(r.error, '');
+  assert.deepEqual(r.skipped, ['forest-home']);
+  assert.deepEqual(r.added.map((p) => p.id), ['forest-creek']);
+  assert.equal(st.places.length, MAX_PLACES);
+  const before = structuredClone(st);
+  assert.match(addPlace(st, { name: '超额' }, 99).error, /最多 60/);
+  assert.deepEqual(st, before);
+  assert.deepEqual(normalizeState(JSON.parse(JSON.stringify(st))), st);
+  const again = applyTerrainSelection(st, 'forest', ['forest-home'], 44);
+  assert.equal(again.error, '', '满额时仍可跳过已有地点');
+});
+
+test('applyTerrain：全套超容量同样原子拒绝，旧超限状态归一化不截断', () => {
+  const st = newState();
+  for (let i = 0; i < MAX_PLACES - 2; i += 1) addPlace(st, { name: `自建${i}` }, 7);
+  const before = structuredClone(st);
+  assert.ok(applyTerrain(st, 'travel', 88).error);
+  assert.deepEqual(st, before);
+  const legacy = normalizeState({ ...st, places: [...st.places, ...terrainPlaces('forest')] });
+  assert.equal(legacy.places.length, MAX_PLACES + 3);
+  const legacyBefore = structuredClone(legacy);
+  assert.ok(applyTerrain(legacy, 'travel', 99).error);
+  assert.deepEqual(legacy, legacyBefore);
+  assert.ok(addPlace(legacy, { name: '超限再加' }).error);
+});
+
+test('applyTerrainSelection：第5参启用示例描写，仅影响新增，已有空白与自写均保留', () => {
+  const st = newState();
+  applyTerrainSelection(st, 'forest', ['forest-home', 'forest-creek'], 1);
+  editPlace(st, 'forest-creek', { desc: '自己的溪边', style: '水彩' });
+  const r = applyTerrainSelection(st, 'forest', null, 2, { withDescriptions: true });
+  assert.equal(r.error, '');
+  assert.equal(r.added.length, 3);
+  assert.ok(r.added.every((p) => p.desc));
+  assert.equal(placeById(st, 'forest-home').desc, '');
+  assert.equal(placeById(st, 'forest-creek').desc, '自己的溪边');
+  assert.equal(placeById(st, 'forest-creek').style, '水彩');
 });
 
 await report();

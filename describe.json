@@ -2,17 +2,36 @@
   "tools": [
     {
       "name": "map_places",
-      "description": "看看周围有哪些地方：家、常去的、附近的、去远处旅行的。每处给一句文字描写、有没有图、是不是常去。默认按「常去 > 家 > 周围 > 旅行」排；想只看一类就填 kind。没有路线、没有远近，也没有「怎么走」。",
+      "description": "分页查询地点索引：名称、id、分类、常去及有图状态。按常去优先排序，详情用 map_look。",
       "parameters": {
         "type": "object",
         "properties": {
           "kind": {
             "type": "string",
-            "description": "只看某一类：家 / 常去的 / 周围 / 旅行（英文 home / frequent / around / travel 也认）。不填就全列。"
+            "description": "分类筛选：家 / 常去的 / 周围 / 旅行，或 home / frequent / around / travel；不填则不限分类。"
           },
           "all": {
             "type": "boolean",
-            "description": "填 true 就列全部，否则也只列全部（这里没有截断，留着这个参数是为了和别的工具一致）。"
+            "description": "true 返回筛选后的全部索引，忽略分页；默认分页。"
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "页码，从 1 开始，默认 1。"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "每页条数，默认 10，最多 20。"
+          },
+          "tag": {
+            "type": "string",
+            "description": "只列包含这个标签的地点。"
+          },
+          "relatedTo": {
+            "type": "string",
+            "description": "只列与这个地点有主人登记关联的地点 id。"
           }
         },
         "additionalProperties": false
@@ -28,7 +47,7 @@
     },
     {
       "name": "map_look",
-      "description": "看某一处长什么样：回执给这一处的文字描写、画风锚点、有没有图。写日程说「此刻在哪」、或者想发图之前用它。这处还空着的时候会明说空着——别替主人编一段描写。",
+      "description": "查询地点完整描写、有效画风、标签、关联和图片状态；具体描述或发图前使用。空白内容不得编造。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -53,7 +72,7 @@
     },
     {
       "name": "map_add",
-      "description": "加一处地方。只填文字：名字、别名、属于哪一类（家 / 常去的 / 周围 / 旅行）、一句描写、一句画风锚点。**不填坐标、不填路线、不填多远**——这个插件没有这些。",
+      "description": "按主人要求新增文字地点；不登记坐标、路线或距离。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -91,6 +110,15 @@
           "frequent": {
             "type": "boolean",
             "description": "是不是常去（置顶）。"
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "maxLength": 24
+            },
+            "description": "主人自定义标签，最多 8 个。"
           }
         },
         "required": [
@@ -108,7 +136,7 @@
     },
     {
       "name": "map_edit",
-      "description": "改某一处的文字：描写、画风锚点、别名、归类、是否常去、scene 正名、娱乐时间那处。只改传进来的那几项，没传的一个字都不动。要换图用 map_cover。",
+      "description": "按主人要求修改地点，仅更新传入字段；数组整套替换。换图用 map_cover。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -150,6 +178,39 @@
           "frequent": {
             "type": "boolean",
             "description": "标成 / 取消「常去」。"
+          },
+          "tags": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "type": "string",
+              "maxLength": 24
+            },
+            "description": "整套替换主人自定义标签；空数组清空。"
+          },
+          "relations": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "主人明确要求时登记地点关联；整套替换，空数组清空。只写两处的语境说明，不写方向、远近或走法，不能自行推断长期事实。",
+            "items": {
+              "type": "object",
+              "properties": {
+                "placeId": {
+                  "type": "string",
+                  "description": "已存在的目标地点 id，用 map_places 确认，不填名字。"
+                },
+                "note": {
+                  "type": "string",
+                  "maxLength": 80,
+                  "description": "关联说明，例如“窗边能看见溪面”；不含方位、距离或路径。"
+                }
+              },
+              "required": [
+                "placeId",
+                "note"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
@@ -167,7 +228,7 @@
     },
     {
       "name": "map_cover",
-      "description": "这处地方的图：换成本地的一张、或者清空。**图是主人从面板上传的**，不是这里画的；你来这里只做两件事——把主人放好的那张挂上去，或者清空。清空之后主人才可以再放一张新的（有图的时候它锁死，不会自己变）。",
+      "description": "查询封面，或按主人明确要求挂载已上传的本地图片、清空封面；不生成图片，不自动改图。",
       "parameters": {
         "type": "object",
         "properties": {
@@ -220,7 +281,7 @@
       "key": "worlds.map.env",
       "title": "鱼的小世界",
       "role": "envPrompt",
-      "content": "## 小地图\n\n你周围有哪些地方——家在哪、常去哪儿、附近有什么、去远处旅行可以是什么样。每一处只有**文字**：空间、陈设、配色、光线、氛围，加一句固定的画风锚点；有主人放的图就照着那张看。\n\n**这里没有路线、没有坐标、没有距离、也没有导航。** 一处地方就是「它长什么样」，不是「怎么走到它」。所以不要从这儿推「走十分钟到 X」「先出小区再左转」——这种话不该出现在你说的地方上。\n\n- 想看有哪些地方：`map_places`。默认按「常去 > 家 > 周围 > 旅行」排，`kind` 能只看一类（家 / 常去的 / 周围 / 旅行）。\n- 想看某一处具体长什么样：`map_look`（`place` 填正名，别名也认）。回执给那句描写、画风锚点、有没有图。\n- 这处还空着、没写描写时，回执会明说「还没写描写」——**那就说不知道，别替主人编一段**。那是他的地方，不是你的。\n- 主人加地方、改描写、传图都在面板里做，或者让你用 `map_add` / `map_edit` / `map_cover`。加地方**只填文字**：名字、别名、归类、一句描写、一句画风锚点，没有坐标可填。\n- 一处地方一旦有了图就**锁着**，不会自己变；要换得主人先清空再放一张新的。所以看到有图的那处，就照着那张说，别另画一张。\n\n{{map_places_block}}\n\n## 旅行那几处\n\n「旅行」这一类的几处地方是**远方**：海边小镇、雪山客栈、古城老街、温泉旅馆、林间营地那种。\n\n- 它只回答「那儿长什么样」。**几天、怎么去、先去哪后去哪、行程怎么排，都不在这里**——那是你自己日程该管的事，别从小地图里推行程。\n- 真想去的时候，回执会告诉你娱乐时间里**最接近这处的一处**是哪个。那是「最接近的一处」，不是同一个地方：别把「江边」说成「海边小镇」，也别把「澡堂」说成「温泉旅馆」。\n- 只是想想、说说那儿是什么样，也完全可以——不去也是一种说法。\n\n{{map_feast_block}}\n\n{{map_imggen_block}}\n\n## 不用你操心的事\n\n- 你不必为了「地图上有这处」才去某处；不去也照样是这处地方。\n- 主人没写描写的地方就是空的，空着不是待办，不用催他填。\n- 地点会一直是这些，改的是文字和画面，不是路线和远近。\n"
+      "content": "## 小地图\n\n登记地点的文字外观与画风，不提供坐标、方向、距离、路线、导航或行程；不得推断这些信息。\n\n- `map_places` 分页查询地点索引，可按分类、标签或关联筛选；`map_look` 查询完整描写、画风、标签和关联。`map_view` 查看完整分组概览。索引未列出不代表地点不存在。\n- 家、家里、回家指当前住所。查询可用正名、别名或 id；同名歧义须使用明确 id，不猜选。\n- 空白描写就是未知，不编造；标签只用于整理，完整度只是管理提示，不催主人补齐。\n- 主人可在面板管理地点，也可明确要求用 `map_add`、`map_edit`、`map_cover` 修改。关联须由主人明确登记，仅表示文字语境，不推断反向关系或可达性；`relations` 整套替换，空数组清空。\n- 图片由主人上传，有图即锁定，换图或清空须主人明确操作，不自动重画。工具未附图片就不能声称看过，外观以登记描写为准。地点画风优先，否则用世界默认文字画风；不改变已有图片。\n- 旅行地点只描述外观，不推断交通或行程。娱乐时间中登记的对应场所只是最接近的一处，不是同一地点。\n\n{{map_places_block}}\n\n{{map_feast_block}}\n\n{{map_imggen_block}}\n"
     }
   ]
 }

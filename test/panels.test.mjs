@@ -116,6 +116,12 @@ class Node {
 
   getAttribute(k) { return this.attributes[k]; }
 
+  removeAttribute(k) {
+    delete this.attributes[k];
+    if (k === 'disabled') this.disabled = false;
+    if (k === 'checked') this.checked = false;
+  }
+
   addEventListener(type, fn) {
     (this._listeners[type] ??= []).push(fn);
   }
@@ -262,7 +268,7 @@ async function mountPanels({ language = 'zh', failList = false, cfg = {}, imggen
     return domRoot;
   }
 
-  return { world, bundle, decl, mount, root: domRoot, invocations, intervals: intervalBox.list, dataDir, tool };
+  return { world, bundle, decl, mount, root: domRoot, invocations, intervals: intervalBox.list, dataDir, tool, ctx };
 }
 
 // ---------------------------------------------------------------------------
@@ -384,11 +390,11 @@ test('选地形不直接加：先出勾选表，勾着才加', async () => {
 
   // 点一套「还没加过」的地形：应当出勾选表，而不是立刻加进去
   pickTerrain(root, '江边');
-  await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '出现勾选表');
   assert.equal(root.querySelectorAll('.map-card').length, 5, '还没点「加进去」之前一处都不该加');
 
   // 默认全选（2026-11-15 定）。勾的记号是行自己的 class + ✓，不是原生 checkbox。
-  const rows = () => root.querySelector('.map-picker').querySelectorAll('.map-pick')
+  const rows = () => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelectorAll('.map-pick')
     .filter((r) => !r.classList.contains('map-pick-done'));
   assert.equal(rows().length, 5, '勾选表该列出这套的 5 处');
   assert.equal(rows().filter((r) => r.classList.contains('map-pick-on')).length, 5, '默认应当全选');
@@ -396,20 +402,20 @@ test('选地形不直接加：先出勾选表，勾着才加', async () => {
   assert.ok(rows().every((r) => r.querySelector('.map-pick-glyph').textContent === '✓'), '选中的行该有 ✓');
 
   // 摘要要说清勾了哪几处
-  const summary = root.querySelector('.map-picker').querySelector('.map-picked');
+  const summary = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelector('.map-picked');
   assert.ok(summary.textContent.includes('5 处'), `摘要该报数量：${summary.textContent}`);
   assert.ok(summary.textContent.includes('江边石墩'), `摘要该列出名字：${summary.textContent}`);
 
   // 点两下取消（点整行，不是点复选框）
   rows()[1].fire('click');
   await waitFor(() => rows().filter((r) => r.classList.contains('map-pick-on')).length === 4, '取消一处后剩 4');
-  root.querySelector('.map-picker').querySelectorAll('.map-pick').find((r) => r.querySelector('.map-pick-name').textContent === '旧码头').fire('click');
+  root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelectorAll('.map-pick').find((r) => r.querySelector('.map-pick-name').textContent === '旧码头').fire('click');
   await waitFor(() => rows().filter((r) => r.classList.contains('map-pick-on')).length === 3, '取消两处后剩 3');
   // 摘要跟着变
-  assert.ok(root.querySelector('.map-picker').querySelector('.map-picked').textContent.includes('3 处'),
+  assert.ok(root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelector('.map-picked').textContent.includes('3 处'),
     '摘要该跟着变成 3 处');
 
-  const submit = root.querySelector('.map-picker').findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
+  const submit = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
   assert.ok(submit, '该有「加进去」按钮');
   submit.fire('click');
 
@@ -430,9 +436,9 @@ test('勾选表：一套已经全加完时，明说「都已在图上」而不�
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
 
   pickTerrain(root, '林间'); // 这一套已经全加过了
-  await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '出现勾选表');
 
-  const picker = root.querySelector('.map-picker');
+  const picker = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer'));
   assert.ok(picker.textContent.includes('都已在图上'), `该明说全加完了：${picker.textContent.slice(0, 80)}`);
   // 没有可勾的行（不给点不动的东西）
   assert.equal(picker.querySelectorAll('.map-pick-on').length, 0, '都已经有了就不该再有可勾的行');
@@ -448,7 +454,7 @@ test('地形是一排按钮，不是下拉（下拉在真机上两次「点不�
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
 
-  assert.equal(root.querySelector('select'), null, '不该再有 <select>');
+  assert.equal(root.querySelector('.map-terrains').querySelector('select'), null, '地形选择不该有 <select>');
   assert.equal(root.querySelectorAll('.map-terrain').length, 5, '该有 5 个地形按钮');
   // 当前地形用一个小标签显示，而不是塞进按钮里假装已选中
   assert.ok(root.textContent.includes('当前'), '该有「当前：林间」这样的标签');
@@ -465,11 +471,11 @@ test('点当前那套地形的按钮会切换收起，不会卡死', async () =>
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
 
   pickTerrain(root, '江边');
-  await waitFor(() => root.querySelector('.map-picker'), '先出勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '先出勾选表');
   // 再点另一个地形：勾选表应当切到那一套，而不是没反应
   pickTerrain(root, '山脚');
-  await waitFor(() => root.querySelector('.map-picker'), '切到山脚');
-  assert.ok(root.querySelector('.map-picker').textContent.includes('山脚'), '勾选表该切到山脚');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '切到山脚');
+  assert.ok(root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).textContent.includes('山脚'), '勾选表该切到山脚');
 });
 
 test('勾选表：全选 / 全不选按钮', async () => {
@@ -477,18 +483,18 @@ test('勾选表：全选 / 全不选按钮', async () => {
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
   pickTerrain(root, '山脚');
-  await waitFor(() => root.querySelector('.map-picker'), '出现勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '出现勾选表');
 
-  const onRows = () => root.querySelector('.map-picker').querySelectorAll('.map-pick-on');
-  const btn = (label) => root.querySelector('.map-picker')
+  const onRows = () => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelectorAll('.map-pick-on');
+  const btn = (label) => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer'))
     .findAll((n) => n.tagName === 'BUTTON' && n.textContent === label)[0];
 
   btn('全不选').fire('click');
   await waitFor(() => onRows().length === 0, '全不选之后一个都不勾');
   // 一条都没勾时：摘要明说、按钮禁用（不给出一个点了没用的按钮）
-  assert.ok(root.querySelector('.map-picker').querySelector('.map-picked').textContent.includes('还没勾'),
+  assert.ok(root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelector('.map-picked').textContent.includes('还没勾'),
     '全不选时摘要该说「还没勾」');
-  const submit0 = root.querySelector('.map-picker').findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
+  const submit0 = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
   assert.equal(submit0.disabled, true, '一处都没勾时「加进去」该禁用');
 
   btn('全选').fire('click');
@@ -563,6 +569,99 @@ test('在详情里改描写并保存，卡片跟着变', async () => {
       .find((c) => c.querySelector('.map-card-name')?.textContent === '溪边');
     return card?.textContent.includes('水很浅');
   }, '卡片上显示新描写');
+});
+
+test('地点关联草稿切卡刷新可恢复，增删目标、保存及清空一致', async () => {
+  const { mount, ctx, decl } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  const relationBox = () => root.querySelector('.map-relations');
+  const relationSelects = () => relationBox()?.querySelectorAll('select') ?? [];
+  const relationNotes = () => relationBox()?.querySelectorAll('input') ?? [];
+  openPlace(root, '溪边');
+  button(root, '添加关联').fire('click');
+  assert.equal(relationSelects().length, 1);
+  relationSelects()[0].value = 'forest-old-oak';
+  relationSelects()[0].fire('change');
+  type(relationNotes()[0], '树影落在溪面');
+  openPlace(root, '老橡树');
+  openPlace(root, '溪边');
+  assert.equal(relationSelects()[0].value, 'forest-old-oak');
+  assert.equal(relationNotes()[0].value, '树影落在溪面');
+  button(root, '刷新').fire('click');
+  await waitFor(() => relationNotes()[0]?.value === '树影落在溪面');
+  button(root, '存一下').fire('click');
+  await waitFor(() => root.textContent.includes('存好了'));
+  const saved = await decl.invoke('places', 'list', []);
+  assert.deepEqual(saved.places.find((p) => p.id === 'forest-creek').relations, [{ placeId: 'forest-old-oak', note: '树影落在溪面' }]);
+
+  await waitFor(() => button(root, '存一下'));
+  button(root, '添加关联').fire('click');
+  const remove = root.findAll((n) => n.tagName === 'BUTTON' && n.textContent === '删除关联')[1];
+  remove.fire('click');
+  assert.equal(relationSelects().length, 1, '删除新加的空行不应清掉已保存目标');
+  relationSelects()[0].value = '';
+  relationSelects()[0].fire('change');
+  type(relationNotes()[0], '');
+  button(root, '存一下').fire('click');
+  await waitFor(() => root.textContent.includes('目标和说明'));
+  assert.deepEqual((await decl.invoke('places', 'list', [])).places.find((p) => p.id === 'forest-creek').relations, [{ placeId: 'forest-old-oak', note: '树影落在溪面' }]);
+});
+
+test('关系保存期间继续编辑不丢，删除全部关联可保存为空数组', async () => {
+  const { mount, ctx, decl } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  openPlace(root, '溪边');
+  button(root, '添加关联').fire('click');
+  const target = field(root, '关联地点');
+  target.value = 'forest-old-oak'; target.fire('change');
+  type(field(root, '关联说明'), '提交的树影');
+  const invoke = ctx.invoke;
+  let release;
+  ctx.invoke = async (method, args) => {
+    if (method === 'edit') await new Promise((resolve) => { release = resolve; });
+    return invoke(method, args);
+  };
+  button(root, '存一下').fire('click');
+  await waitFor(() => release);
+  type(field(root, '关联说明'), '保存中继续写的树影');
+  release();
+  await waitFor(() => button(root, '存一下'));
+  assert.equal(field(root, '关联说明').value, '保存中继续写的树影');
+  assert.equal((await decl.invoke('places', 'list', [])).places.find((p) => p.id === 'forest-creek').relations[0].note, '提交的树影');
+  ctx.invoke = invoke;
+  button(root, '删除关联').fire('click');
+  assert.equal(root.querySelector('.map-relations').querySelectorAll('select').length, 0);
+  openPlace(root, '老橡树'); openPlace(root, '溪边');
+  assert.equal(root.querySelector('.map-relations').querySelectorAll('select').length, 0, '空数组草稿也应覆盖已有关系');
+  button(root, '存一下').fire('click');
+  await waitFor(() => button(root, '存一下'));
+  assert.deepEqual((await decl.invoke('places', 'list', [])).places.find((p) => p.id === 'forest-creek').relations, []);
+});
+
+test('关系草稿重挂后明确恢复或丢弃，删除的目标不会被草稿静默保存', async () => {
+  const { mount, decl, tool } = await mountPanels();
+  const relations = [{ placeId: 'forest-old-oak', note: '树影落在溪面' }];
+  const saved = await decl.invoke('places', 'saveDrafts', [{ drafts: [{ id: 'forest-creek', fields: { relationsJson: JSON.stringify(relations) } }] }]);
+  assert.equal(saved.ok, true, saved.error);
+  const root = await mount();
+  await waitFor(() => button(root, '恢复草稿'));
+  button(root, '恢复草稿').fire('click');
+  assert.equal(field(root, '关联地点').value, 'forest-old-oak');
+  assert.equal(field(root, '关联说明').value, '树影落在溪面');
+  await decl.invoke('places', 'remove', [{ id: 'forest-old-oak' }]);
+  button(root, '刷新').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 4);
+  button(root, '存一下').fire('click');
+  await waitFor(() => root.textContent.includes('目标和说明'));
+  assert.deepEqual((await decl.invoke('places', 'list', [])).places.find((p) => p.id === 'forest-creek').relations, []);
+  await mount();
+  await waitFor(() => button(root, '丢弃草稿'));
+  button(root, '丢弃草稿').fire('click');
+  await waitFor(() => !button(root, '丢弃草稿'));
+  openPlace(root, '溪边');
+  assert.equal(root.querySelector('.map-relations').querySelectorAll('select').length, 0);
 });
 
 test('标成常去之后，卡片出现在「常去」那一段', async () => {
@@ -726,7 +825,7 @@ test('删除一处之后，地形下拉仍然能用（会出勾选表）', async
   assert.equal(btns.length, 5, '删除之后地形按钮还在');
   assert.ok(btns.every((b) => b.disabled !== true), '删除之后按钮都不该被禁用');
   pickTerrain(root, '山脚');
-  await waitFor(() => root.querySelector('.map-picker'), '删除之后仍能出勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '删除之后仍能出勾选表');
 });
 
 test('删除一处之后，「加一处」仍然能用', async () => {
@@ -759,7 +858,7 @@ test('勾选表开着的时候删掉一处，勾选表仍然能用', async () =>
 
   // 先开一个勾选表（江边，5 处都没加）
   pickTerrain(root, '江边');
-  await waitFor(() => root.querySelector('.map-picker'), '先出勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '先出勾选表');
 
   // 再把「蘑菇坡」删掉
   globalThis.window = { confirm: () => true };
@@ -773,7 +872,7 @@ test('勾选表开着的时候删掉一处，勾选表仍然能用', async () =>
   }
 
   // 勾选表应该还在，而且按钮可点
-  const picker = root.querySelector('.map-picker');
+  const picker = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer'));
   assert.ok(picker, '删除之后勾选表还该在');
   const submit = picker.findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
   assert.ok(submit, '勾选表里该有「加进去」');
@@ -788,7 +887,7 @@ test('守门断言：按钮上的处数必须等于「看起来勾着的行数�
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
 
   const check = (label) => {
-    const picker = root.querySelector('.map-picker');
+    const picker = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer'));
     assert.ok(picker, `「${label}」时该有勾选表`);
     const on = picker.querySelectorAll('.map-pick-on').length;
     const btn = picker.findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0];
@@ -801,14 +900,14 @@ test('守门断言：按钮上的处数必须等于「看起来勾着的行数�
   };
 
   pickTerrain(root, '江边');
-  await waitFor(() => root.querySelector('.map-picker'), '出勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '出勾选表');
   assert.equal(check('默认'), 5, '默认该是 5 处且 5 行亮着');
 
   // 逐行点掉，每一步都要自洽
   for (const want of [4, 3, 2, 1, 0]) {
-    const rows = root.querySelector('.map-picker').querySelectorAll('.map-pick-on');
+    const rows = root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelectorAll('.map-pick-on');
     rows[0].fire('click');
-    await waitFor(() => root.querySelector('.map-picker').querySelectorAll('.map-pick-on').length === want,
+    await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelectorAll('.map-pick-on').length === want,
       `点掉一行后剩 ${want}`);
     assert.equal(check(`剩 ${want}`), want);
   }
@@ -819,20 +918,20 @@ test('summary：没勾时明说「还没勾」，勾了就列出名字', async (
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
   pickTerrain(root, '山脚');
-  await waitFor(() => root.querySelector('.map-picker'), '出勾选表');
+  await waitFor(() => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')), '出勾选表');
 
-  const summary = () => root.querySelector('.map-picker').querySelector('.map-picked').textContent;
+  const summary = () => root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelector('.map-picked').textContent;
   assert.ok(summary().includes('5 处'), summary());
   for (const name of ['家', '上山口', '山泉', '半坡亭', '碎石坡']) {
     assert.ok(summary().includes(name), `摘要该列出「${name}」：${summary()}`);
   }
 
   // 全不选 → 明确说还没勾
-  root.querySelector('.map-picker').findAll((n) => n.tagName === 'BUTTON' && n.textContent === '全不选')[0].fire('click');
+  root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).findAll((n) => n.tagName === 'BUTTON' && n.textContent === '全不选')[0].fire('click');
   await waitFor(() => summary().includes('还没勾'), '全不选后摘要该说还没勾');
 
   // 点一行 → 摘要只列那一处
-  root.querySelector('.map-picker').querySelectorAll('.map-pick').find((r) => r.querySelector('.map-pick-name').textContent === '山泉').fire('click');
+  root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).querySelectorAll('.map-pick').find((r) => r.querySelector('.map-pick-name').textContent === '山泉').fire('click');
   await waitFor(() => summary().includes('山泉'), '点了「山泉」摘要该列出来');
   assert.ok(!summary().includes('半坡亭'), `没勾的不该出现在摘要里：${summary()}`);
 });
@@ -906,6 +1005,647 @@ test('英文界面也能挂起来（label 走英文文案）', async () => {
   const root = await mount();
   await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
   assert.ok(root.textContent.includes('places') || root.textContent.includes('Around'), root.textContent.slice(0, 120));
+});
+
+// Draft regressions exercise redraws, failed requests and out-of-order responses.
+const button = (root, text) => root.findAll((n) => n.tagName === 'BUTTON' && n.textContent === text)[0];
+const openPlace = (root, name) => root.querySelectorAll('.map-card').find((c) => c.querySelector('.map-card-name').textContent === name).fire('click');
+const field = (root, label) => root.findAll((n) => ['INPUT', 'TEXTAREA', 'SELECT'].includes(n.tagName) && n.getAttribute('aria-label') === label)[0];
+function type(node, value) { node.value = value; node.fire('input'); }
+
+test('草稿按地点独立：切换、自动刷新和失败重绘保留全部输入，成功后清理', async () => {
+  const { mount, ctx, intervals, tool } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  openPlace(root, '溪边');
+  type(field(root, 'name'), '溪边草稿');
+  type(field(root, '描写'), '未存溪边');
+  type(field(root, '别名（逗号分开）'), '浅溪,小溪');
+  type(field(root, 'kind'), 'travel');
+  openPlace(root, '老橡树');
+  type(field(root, '描写'), '未存橡树');
+  openPlace(root, '溪边');
+  assert.equal(field(root, 'name').value, '溪边草稿');
+  assert.equal(field(root, 'kind').value, 'travel');
+  intervals[0].fn();
+  await waitFor(() => field(root, '描写')?.value === '未存溪边');
+  const invoke = ctx.invoke;
+  ctx.invoke = async (method, args) => method === 'edit' ? { ok: false, error: '保存失败' } : invoke(method, args);
+  button(root, '存一下').fire('click');
+  await waitFor(() => root.textContent.includes('保存失败'));
+  assert.equal(field(root, '描写').value, '未存溪边');
+  assert.equal(field(root, '别名（逗号分开）').value, '浅溪,小溪');
+  ctx.invoke = invoke;
+  button(root, '存一下').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card-name').some((n) => n.textContent === '溪边草稿'));
+  await tool('map_edit')({ place: '溪边草稿', desc: '服务端后续修改' });
+  button(root, '刷新').fire('click');
+  await waitFor(() => field(root, '描写')?.value === '服务端后续修改');
+  openPlace(root, '老橡树');
+  assert.equal(field(root, '描写').value, '未存橡树');
+});
+
+test('新增草稿跨取消、刷新和失败保留，保存成功清空', async () => {
+  const { mount, ctx } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  button(root, '加一处').fire('click');
+  type(field(root, '叫什么'), '草稿码头');
+  type(field(root, '一句话描写（空间、陈设、配色、光线，不写她在干什么）'), '木头栏杆');
+  button(root, '取消').fire('click');
+  button(root, '加一处').fire('click');
+  assert.equal(field(root, '叫什么').value, '草稿码头');
+  const invoke = ctx.invoke;
+  ctx.invoke = async (method, args) => method === 'add' ? { ok: false, error: '新增失败' } : invoke(method, args);
+  button(root, '加进去').fire('click');
+  await waitFor(() => root.textContent.includes('新增失败'));
+  assert.equal(field(root, '叫什么').value, '草稿码头');
+  ctx.invoke = invoke;
+  button(root, '刷新').fire('click');
+  await waitFor(() => field(root, '叫什么')?.value === '草稿码头');
+  button(root, '加进去').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 6);
+  button(root, '加一处').fire('click');
+  assert.equal(field(root, '叫什么').value, '');
+});
+
+test('旧list成功或失败均不能覆盖新响应，保存期间继续输入仍保留', async () => {
+  const { bundle, decl } = await mountPanels();
+  const root = new Node('div');
+  const pending = [];
+  let deferred = false;
+  let releaseEdit;
+  const ctx = { root, language: 'zh', signal: { aborted: false },
+    async invoke(method, args) {
+      if (method === 'list' && deferred) return new Promise((resolve, reject) => pending.push({ resolve, reject }));
+      if (method === 'edit') await new Promise((resolve) => { releaseEdit = resolve; });
+      return decl.invoke('places', method, args ?? []);
+    } };
+  const panel = bundle.default.panels.places.mount(ctx);
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  const data = await decl.invoke('places', 'list', []);
+  deferred = true;
+  const older = panel.refresh();
+  const newer = panel.refresh();
+  const fresh = structuredClone(data);
+  fresh.places[0].name = '最新名字';
+  pending[1].resolve(fresh);
+  await newer;
+  pending[0].resolve(data);
+  await older;
+  assert.ok(root.textContent.includes('最新名字'));
+  const oldFailure = panel.refresh();
+  const latest = panel.refresh();
+  pending[3].resolve(fresh);
+  await latest;
+  pending[2].reject(new Error('过期错误'));
+  await oldFailure;
+  assert.ok(!root.textContent.includes('过期错误'));
+  deferred = false;
+  openPlace(root, '溪边');
+  type(field(root, '描写'), '提交的版本');
+  button(root, '存一下').fire('click');
+  await waitFor(() => releaseEdit);
+  type(field(root, '描写'), '请求期间继续写');
+  releaseEdit();
+  await waitFor(() => root.textContent.includes('存好了'));
+  assert.equal(field(root, '描写').value, '请求期间继续写');
+});
+
+test('加载失败和渲染失败后重试，草稿仍可恢复并继续编辑', async () => {
+  const { mount, ctx, decl } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  openPlace(root, '溪边');
+  type(field(root, '描写'), '错误之后也要留下');
+  const invoke = ctx.invoke;
+  ctx.invoke = async (method, args) => {
+    if (method === 'list') throw new Error('临时断线');
+    return invoke(method, args);
+  };
+  button(root, '刷新').fire('click');
+  await waitFor(() => root.textContent.includes('临时断线'));
+  assert.equal(field(root, '描写').value, '错误之后也要留下');
+  const data = await decl.invoke('places', 'list', []);
+  ctx.invoke = async (method, args) => method === 'list' ? { ...data, summary: null } : invoke(method, args);
+  button(root, '刷新').fire('click');
+  await waitFor(() => root.textContent.includes('画面刷新失败'));
+  ctx.invoke = invoke;
+  button(root, '重新载入').fire('click');
+  await waitFor(() => field(root, '描写')?.value === '错误之后也要留下');
+  type(field(root, '描写'), '恢复后继续写');
+  openPlace(root, '老橡树');
+  openPlace(root, '溪边');
+  assert.equal(field(root, '描写').value, '恢复后继续写');
+});
+
+test('联动状态区分关、未启用、未填及可提示，不推断库内存在', async () => {
+  for (const [opts, expected] of [
+    [{ imggen: true, cfg: { mapImggenOn: false } }, '生图：关'],
+    [{ imggen: false }, '生图：未启用'],
+    [{ imggen: true }, '生图：未填场景'],
+  ]) {
+    const { mount } = await mountPanels(opts);
+    const root = await mount();
+    await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+    assert.ok(root.textContent.includes(expected), expected);
+    assert.ok(!root.textContent.includes('素材库里没有这处'));
+  }
+  const { mount, tool } = await mountPanels({ imggen: true });
+  await tool('map_edit')({ place: '溪边', scene: '主人填写的场景' });
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  assert.ok(root.textContent.includes('生图：已填可提示'));
+});
+
+test('示例描写开关默认关闭，勾选后terrain传boolean且重绘保留', async () => {
+  const { mount, invocations } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  pickTerrain(root, '江边');
+  assert.equal(Boolean(field(root, '使用示例描写').checked), false);
+  const toggle = field(root, '使用示例描写');
+  toggle.checked = true;
+  toggle.fire('change');
+  button(root, '全不选').fire('click');
+  assert.equal(field(root, '使用示例描写').checked, true);
+  button(root, '全选').fire('click');
+  root.querySelectorAll('.map-picker').find((n) => !n.classList.contains('map-transfer')).findAll((n) => n.tagName === 'BUTTON' && /加进去/.test(n.textContent))[0].fire('click');
+  await waitFor(() => invocations.some((r) => r.method === 'terrain'));
+  assert.equal(invocations.find((r) => r.method === 'terrain').args[0].withDescriptions, true);
+});
+
+test('搜索与缺描写筛选沿面板控件过滤地点', async () => {
+  const { mount, tool } = await mountPanels();
+  await tool('map_edit')({ place: '溪边', aliases: ['浅溪'] });
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+
+  const search = field(root, '搜索名称、别名、地形');
+  type(search, '浅溪');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 1, '按别名搜索');
+  assert.equal(root.querySelector('.map-card-name').textContent, '溪边');
+
+  type(search, '');
+  const filter = field(root, '筛选地点');
+  filter.value = 'noDesc';
+  filter.fire('change');
+  await waitFor(() => root.querySelectorAll('.map-card').length > 0, '只看缺描写地点');
+  assert.ok(root.querySelectorAll('.map-card-name').every((n) => n.textContent !== '溪边'));
+});
+
+test('住所候选的设为当前住所按钮实际调用 setHome 并更新状态', async () => {
+  const { mount, decl } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  openPlace(root, '家');
+  await waitFor(() => root.querySelector('.map-detail'));
+  const before = root.textContent;
+  button(root, '设为当前住所').fire('click');
+  await waitFor(() => root.textContent !== before && root.textContent.includes('当前住所'));
+  const result = await decl.invoke('places', 'list', []);
+  assert.equal(result.homeId, 'forest-home');
+});
+
+test('编辑冲突保留草稿并允许载入当前版本', async () => {
+  const { mount, ctx, tool } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  openPlace(root, '溪边');
+  type(field(root, '描写'), '我的未保存版本');
+  await tool('map_edit')({ place: '溪边', desc: '服务器的新版本' });
+  button(root, '存一下').fire('click');
+  await waitFor(() => root.textContent.includes('载入当前版本'));
+  assert.equal(field(root, '描写').value, '我的未保存版本');
+  button(root, '载入当前版本').fire('click');
+  await waitFor(() => field(root, '描写')?.value === '服务器的新版本');
+  assert.ok(!root.textContent.includes('载入当前版本'));
+  void ctx;
+});
+
+test('草稿经后端 saveDrafts 预置后重挂可恢复或丢弃', async () => {
+  const { mount, decl, dataDir } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  assert.equal((await decl.invoke('places', 'saveDrafts', [{ drafts: [{ id: 'forest-creek', fields: { desc: '重挂恢复的草稿' } }] }])).ok, true);
+
+  const remount = await mount();
+  await waitFor(() => remount.textContent.includes('恢复草稿'));
+  button(remount, '恢复草稿').fire('click');
+  await waitFor(() => field(remount, '描写')?.value === '重挂恢复的草稿');
+
+  await decl.invoke('places', 'saveDrafts', [{ drafts: [{ id: 'forest-creek', fields: { desc: '待丢弃' } }] }]);
+  const again = await mount();
+  await waitFor(() => again.textContent.includes('丢弃草稿'));
+  button(again, '丢弃草稿').fire('click');
+  await waitFor(() => !again.textContent.includes('恢复草稿'));
+  assert.deepEqual((await decl.invoke('places', 'drafts', [])).drafts, []);
+  void dataDir;
+});
+
+test('导入文件经预览后需明确确认才会导入', async () => {
+  const { mount, ctx, decl, tool } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  await tool('map_add')({ name: '外来地点', kind: 'nearby', desc: '导入测试地点' });
+  const bundle = (await decl.invoke('places', 'export', [])).bundle;
+  const importedPlace = (await decl.invoke('places', 'list', [])).places.find((p) => p.name === '外来地点');
+  assert.ok(importedPlace);
+  assert.equal((await decl.invoke('places', 'remove', [{ id: importedPlace.id }])).ok, true);
+
+  const calls = [];
+  const invoke = ctx.invoke;
+  ctx.invoke = async (method, args) => {
+    calls.push(method);
+    return invoke(method, args);
+  };
+  field(root, '导入模式').value = 'skip';
+  const fileInput = field(root, '导入 JSON');
+  fileInput.files = [{ size: 12, async text() { return JSON.stringify(bundle); } }];
+  fileInput.fire('change');
+  await waitFor(() => calls.includes('previewImport') || root.textContent.includes('地点必须') || root.querySelector('.map-err'), '预览完成或错误');
+  assert.ok(calls.includes('previewImport'), root.querySelector('.map-err')?.textContent ?? root.textContent.slice(-400));
+  assert.ok(root.textContent.includes('确认后才会写入'), root.textContent.slice(-300));
+  const confirm = button(root, '确认导入');
+  assert.ok(confirm, '预览后应显示明确的导入确认按钮');
+  assert.ok(!calls.includes('import'), '预览阶段不能静默导入');
+  button(root, '确认导入').fire('click');
+  await waitFor(() => calls.includes('import') && root.textContent.includes('导入成功'), '明确确认后导入');
+  assert.ok(root.querySelectorAll('.map-card-name').some((n) => n.textContent === '外来地点'));
+});
+
+function deferred() {
+  let resolve, reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+const flushEvents = () => new Promise((resolve) => setImmediate(resolve));
+function selectImportFile(root, bundle) {
+  const input = field(root, '导入 JSON');
+  input.files = [{ size: 12, text: async () => JSON.stringify(bundle) }];
+  input.fire('change');
+  return input;
+}
+
+// These tests mount the shipped panel and use the actual world import methods.
+test('合并导入成功只补空白，保留本地内容、同名图片、常去及住所，成功刷新', async () => {
+  const { mount, ctx, decl, tool, invocations, intervals } = await mountPanels({ withCover: true });
+  await tool('map_edit')({ place: '溪边', tags: ['本地标签'], frequent: true });
+  assert.equal((await decl.invoke('places', 'setHome', [{ id: 'forest-home' }])).ok, true);
+  const original = (await decl.invoke('places', 'export', [])).bundle;
+  const backup = structuredClone(original);
+  const creek = backup.state.places.find((p) => p.id === 'forest-creek');
+  creek.desc = '备份描写'; creek.style = '备份画风'; creek.tags = ['备份标签']; creek.frequent = false;
+  creek.scene = '补入的场景';
+  const changedPng = Buffer.from(PNG); changedPng[changedPng.length - 1] = 9;
+  backup.covers[creek.cover] = `data:image/png;base64,${changedPng.toString('base64')}`;
+  backup.state.places.find((p) => p.id === 'forest-old-oak').name = '备份异名橡树';
+  backup.state.places.find((p) => p.id === 'forest-home').desc = '补入的住所描写';
+  backup.state.places.push({ ...creek, id: 'new-backup-place', name: '不应新增的地点', cover: '' });
+  backup.state.homeId = '';
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5);
+  const mode = field(root, '导入模式');
+  mode.value = 'merge'; mode.fire('change');
+  const file = selectImportFile(root, backup);
+  const confirm = button(root, '确认导入');
+  await waitFor(() => !confirm.disabled, '合并预览完成');
+  assert.match(root.querySelector('.map-transfer').textContent, /本地优先.*只补空白.*冲突保留/);
+  assert.match(root.querySelector('.map-transfer').textContent, /已有图片永不覆盖/);
+  assert.match(root.querySelector('.map-transfer').textContent, /备份异名橡树/);
+  assert.equal(invocations.filter((r) => r.method === 'import').length, 0);
+  const gate = deferred();
+  const invoke = ctx.invoke;
+  let writes = 0;
+  ctx.invoke = async (method, args) => {
+    if (method === 'import') { ++writes; await gate.promise; }
+    return invoke(method, args);
+  };
+  confirm.fire('click'); confirm.fire('click');
+  assert.equal(writes, 1);
+  assert.equal(file.disabled, true); assert.equal(mode.disabled, true); assert.equal(confirm.disabled, true);
+  intervals[0].fn();
+  await flushEvents();
+  assert.equal(field(root, '导入 JSON'), file, '写入中刷新不能生成可用的新文件控件');
+  gate.resolve();
+  await waitFor(() => root.textContent.includes('导入成功') && !file.disabled, '导入成功并刷新');
+  assert.equal(writes, 1);
+  const after = (await decl.invoke('places', 'export', [])).bundle;
+  const saved = after.state.places.find((p) => p.id === creek.id);
+  const local = original.state.places.find((p) => p.id === creek.id);
+  for (const key of ['name', 'desc', 'style', 'tags', 'frequent', 'cover']) assert.deepEqual(saved[key], local[key], key);
+  assert.equal(saved.scene, '补入的场景');
+  assert.equal(after.covers[saved.cover], original.covers[local.cover]);
+  assert.equal(after.state.homeId, original.state.homeId);
+  assert.equal(after.state.places.length, original.state.places.length);
+  assert.equal(after.state.places.find((p) => p.id === 'forest-old-oak').name, '老橡树');
+  assert.ok(root.querySelectorAll('.map-card').some((card) => card.textContent.includes('补入的住所描写')));
+  assert.equal(confirm.disabled, true, '成功后不能重复提交旧预览');
+});
+
+test('导入模式快切允许并发预览，忽略旧成功和旧错误，只提交预览捕获的参数', async () => {
+  const { mount, ctx, decl, invocations } = await mountPanels();
+  const backup = (await decl.invoke('places', 'export', [])).bundle;
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  const invoke = ctx.invoke;
+  const requests = [];
+  ctx.invoke = async (method, args) => {
+    if (method !== 'previewImport') return invoke(method, args);
+    const gate = deferred();
+    requests.push({ args, gate });
+    await gate.promise;
+    return invoke(method, args);
+  };
+  field(root, '导入模式').value = 'skip';
+  selectImportFile(root, backup);
+  await waitFor(() => requests.length === 1);
+  const mode = field(root, '导入模式');
+  const confirm = button(root, '确认导入');
+  for (const value of ['overwrite', 'merge']) {
+    mode.value = value; mode.fire('change');
+    assert.equal(confirm.disabled, true);
+    confirm.fire('click');
+  }
+  assert.deepEqual(requests.map((r) => r.args[0].mode), ['skip', 'overwrite', 'merge']);
+  requests[2].gate.resolve();
+  await waitFor(() => !confirm.disabled);
+  const latest = root.querySelector('.map-transfer').textContent;
+  requests[0].gate.resolve();
+  requests[1].gate.reject(new Error('旧模式错误'));
+  await waitFor(() => invocations.some((r) => r.method === 'previewImport' && r.args[0].mode === 'skip' && r.result), '旧预览实际返回');
+  await flushEvents();
+  assert.equal(root.querySelector('.map-transfer').textContent, latest);
+  assert.equal(confirm.disabled, false);
+  // A control value changed without a change event must never change the approved payload.
+  mode.value = 'overwrite';
+  confirm.fire('click');
+  await waitFor(() => root.textContent.includes('导入成功'));
+  const submitted = invocations.find((r) => r.method === 'import').args[0];
+  assert.equal(submitted.mode, 'merge');
+  assert.deepEqual(submitted.bundle, backup);
+  assert.equal(submitted.expectedRevision, invocations.find((r) => r.method === 'previewImport' && r.args[0].mode === 'merge').result.expectedRevision);
+});
+
+test('切文件立即作废预览，旧预览和慢文件读取均不能覆盖最新文件', async () => {
+  const { mount, ctx, decl, invocations } = await mountPanels();
+  const backup = (await decl.invoke('places', 'export', [])).bundle;
+  const latest = structuredClone(backup);
+  latest.state.places.find((p) => p.id === 'forest-home').desc = '最新文件';
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  const invoke = ctx.invoke;
+  const oldPreview = deferred();
+  let delayPreview = true;
+  ctx.invoke = async (method, args) => {
+    if (method === 'previewImport' && delayPreview) { delayPreview = false; await oldPreview.promise; }
+    return invoke(method, args);
+  };
+  const input = selectImportFile(root, backup);
+  await waitFor(() => !delayPreview);
+  const slowFile = deferred();
+  input.files = [{ size: 12, text: () => slowFile.promise }]; input.fire('change');
+  const confirm = button(root, '确认导入');
+  assert.equal(confirm.disabled, true);
+  oldPreview.resolve();
+  await waitFor(() => invocations.some((r) => r.method === 'previewImport' && r.result), '旧文件预览实际返回');
+  await flushEvents();
+  assert.equal(confirm.disabled, true, '旧文件预览返回不能批准正在读取的新文件');
+  selectImportFile(root, latest);
+  await waitFor(() => !confirm.disabled);
+  slowFile.resolve(JSON.stringify(backup));
+  await flushEvents();
+  assert.equal(invocations.filter((r) => r.method === 'previewImport').length, 2, '慢文件不得再触发预览');
+  confirm.fire('click');
+  await waitFor(() => root.textContent.includes('导入成功'));
+  assert.deepEqual(invocations.find((r) => r.method === 'import').args[0].bundle, latest);
+});
+
+test('文件取消、清空、读取失败及过大文件立即作废预览，旧读取错误不影响新文件', async () => {
+  const { mount, decl, invocations } = await mountPanels();
+  const backup = (await decl.invoke('places', 'export', [])).bundle;
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  const input = field(root, '导入 JSON');
+  const confirm = button(root, '确认导入');
+  for (const action of ['cancel', 'empty', 'broken', 'oversize']) {
+    selectImportFile(root, backup);
+    await waitFor(() => !confirm.disabled);
+    if (action === 'cancel') input.fire('cancel');
+    else {
+      input.files = action === 'empty' ? [] : [{ size: action === 'oversize' ? 65 * 1024 * 1024 : 12, text: async () => '{invalid' }];
+      input.fire('change');
+    }
+    assert.equal(confirm.disabled, true, action);
+    confirm.fire('click');
+    await flushEvents();
+    const mode = field(root, '导入模式'); mode.value = 'merge'; mode.fire('change');
+    await flushEvents();
+    assert.equal(confirm.disabled, true, `${action} 后切模式不能复用旧文件`);
+  }
+  const stale = deferred();
+  input.files = [{ size: 12, text: () => stale.promise }]; input.fire('change');
+  selectImportFile(root, backup);
+  await waitFor(() => !confirm.disabled);
+  stale.reject(new Error('旧文件读取失败'));
+  await flushEvents();
+  assert.equal(confirm.disabled, false);
+  assert.ok(!root.textContent.includes('旧文件读取失败'));
+  const cancelled = deferred();
+  input.files = [{ size: 12, text: () => cancelled.promise }]; input.fire('change');
+  input.fire('cancel');
+  cancelled.resolve(JSON.stringify(backup));
+  await flushEvents();
+  assert.equal(confirm.disabled, true, '取消后慢文件完成也不能恢复预览');
+  assert.equal(invocations.filter((r) => r.method === 'import').length, 0);
+});
+
+test('当前预览或写入失败后确认失效，写入结束恢复文件和模式控件', async () => {
+  const { mount, ctx, decl, invocations } = await mountPanels();
+  const backup = (await decl.invoke('places', 'export', [])).bundle;
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  const input = selectImportFile(root, backup);
+  const confirm = button(root, '确认导入');
+  await waitFor(() => !confirm.disabled);
+  const invoke = ctx.invoke;
+  ctx.invoke = async (method, args) => method === 'previewImport' ? { ok: false, error: '当前预览失败' } : invoke(method, args);
+  const mode = field(root, '导入模式'); mode.value = 'merge'; mode.fire('change');
+  assert.equal(confirm.disabled, true);
+  await waitFor(() => root.textContent.includes('当前预览失败'));
+  confirm.fire('click');
+  assert.equal(invocations.filter((r) => r.method === 'import').length, 0);
+  const gate = deferred();
+  let writes = 0;
+  ctx.invoke = async (method, args) => {
+    if (method === 'import') { ++writes; await gate.promise; return { ok: false, error: '写入失败' }; }
+    return invoke(method, args);
+  };
+  mode.fire('change');
+  await waitFor(() => !confirm.disabled);
+  confirm.fire('click'); confirm.fire('click');
+  assert.equal(input.disabled, true); assert.equal(mode.disabled, true);
+  gate.resolve();
+  await waitFor(() => root.textContent.includes('写入失败'));
+  assert.equal(input.disabled, false); assert.equal(mode.disabled, false); assert.equal(confirm.disabled, true);
+  confirm.fire('click');
+  assert.equal(writes, 1);
+});
+
+test('逐项预览展示中文差异，默认安全合并，新地点可勾选导入且完整 decisions 随确认快照提交', async () => {
+  const { mount, decl, invocations } = await mountPanels();
+  const original = (await decl.invoke('places', 'export', [])).bundle;
+  const backup = structuredClone(original);
+  const creek = backup.state.places.find((p) => p.id === 'forest-creek');
+  creek.desc = '<img src=x onerror=alert(1)>备份描写';
+  creek.scene = '逐项场景';
+  backup.state.places.push({ ...creek, id: 'manual-new-place', name: '手动新地点', cover: '' });
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  assert.equal(field(root, '导入模式').value, 'merge');
+  selectImportFile(root, backup);
+  const confirm = button(root, '确认导入');
+  await waitFor(() => !confirm.disabled);
+  const first = invocations.filter((r) => r.method === 'previewImport').at(-1);
+  assert.equal(Object.hasOwn(first.args[0], 'decisions'), false, '初次预览保持全局模式契约');
+  assert.equal(field(root, '选择导入：手动新地点').checked, false);
+  assert.equal(field(root, '选择导入：溪边').checked, true);
+  assert.ok(root.querySelectorAll('.map-import-diff').length === backup.state.places.length);
+  const diff = root.querySelector('.map-transfer').textContent;
+  assert.match(diff, /描写（保留）.*本地 一条很浅的溪.*备份 <img.*最终 一条很浅的溪/);
+  assert.match(diff, /场景（将修改）.*最终 逐项场景/);
+  assert.equal(root.querySelectorAll('img').length, 0, '备份文字不能作为 HTML 插入');
+  const checkbox = field(root, '选择导入：手动新地点');
+  checkbox.checked = true; checkbox.fire('change');
+  assert.equal(confirm.disabled, true);
+  await waitFor(() => !confirm.disabled);
+  const selected = invocations.filter((r) => r.method === 'previewImport').at(-1);
+  assert.equal(selected.args[0].decisions.length, backup.state.places.length);
+  assert.equal(selected.args[0].decisions.find((d) => d.id === 'manual-new-place').mode, 'overwrite');
+  assert.equal(field(root, '选择导入：手动新地点').checked, true);
+  const handling = field(root, '处理方式：溪边');
+  handling.value = 'overwrite'; handling.fire('change');
+  await waitFor(() => !confirm.disabled);
+  const approved = invocations.filter((r) => r.method === 'previewImport').at(-1);
+  assert.match(root.querySelector('.map-transfer').textContent, /描写（将修改）.*最终 <img/);
+  // Changing DOM properties without events must not alter the approved snapshot.
+  field(root, '处理方式：溪边').value = 'skip';
+  confirm.fire('click');
+  await waitFor(() => root.textContent.includes('导入成功'));
+  const submitted = invocations.find((r) => r.method === 'import').args[0];
+  assert.deepEqual(submitted.decisions, approved.args[0].decisions);
+  assert.equal(submitted.expectedRevision, approved.result.expectedRevision);
+  const after = (await decl.invoke('places', 'export', [])).bundle;
+  assert.ok(after.state.places.some((p) => p.id === 'manual-new-place'));
+  assert.equal(after.state.places.find((p) => p.id === creek.id).desc, creek.desc);
+});
+
+test('逐项取消发送 skip 不新增，切全局模式清除 decisions，旧逐项预览不能批准确认', async () => {
+  const { mount, ctx, decl, invocations } = await mountPanels();
+  const backup = (await decl.invoke('places', 'export', [])).bundle;
+  backup.state.places.push({ ...backup.state.places[0], id: 'must-skip-new', name: '取消的新地点', cover: '' });
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  const mode = field(root, '导入模式'); mode.value = 'overwrite';
+  selectImportFile(root, backup);
+  const confirm = button(root, '确认导入');
+  await waitFor(() => !confirm.disabled);
+  const checkbox = field(root, '选择导入：取消的新地点');
+  assert.equal(checkbox.checked, true);
+  checkbox.checked = false; checkbox.fire('change');
+  await waitFor(() => !confirm.disabled);
+  const deselected = invocations.filter((r) => r.method === 'previewImport').at(-1);
+  assert.equal(deselected.args[0].decisions.find((d) => d.id === 'must-skip-new').mode, 'skip');
+  assert.equal(deselected.result.items.find((i) => i.id === 'must-skip-new').action, 'skipped');
+  const invoke = ctx.invoke;
+  const gate = deferred();
+  ctx.invoke = async (method, args) => {
+    if (method === 'previewImport' && args[0].decisions) await gate.promise;
+    return invoke(method, args);
+  };
+  const select = field(root, '处理方式：取消的新地点');
+  select.value = 'overwrite'; select.fire('change');
+  assert.equal(confirm.disabled, true);
+  mode.value = 'merge'; mode.fire('change');
+  await waitFor(() => !confirm.disabled);
+  const latestText = root.querySelector('.map-transfer').textContent;
+  assert.equal(Object.hasOwn(invocations.filter((r) => r.method === 'previewImport').at(-1).args[0], 'decisions'), false);
+  gate.resolve();
+  await waitFor(() => invocations.filter((r) => r.method === 'previewImport').length === 4);
+  await flushEvents();
+  assert.equal(root.querySelector('.map-transfer').textContent, latestText);
+  confirm.fire('click');
+  await waitFor(() => root.textContent.includes('导入成功'));
+  assert.equal(Object.hasOwn(invocations.find((r) => r.method === 'import').args[0], 'decisions'), false);
+  assert.equal((await decl.invoke('places', 'list', [])).places.some((p) => p.id === 'must-skip-new'), false);
+});
+
+test('恢复入口挂载读取状态，导入后先预览影响再确认，写入锁与刷新清图缓存', async () => {
+  const { mount, ctx, decl, invocations, intervals } = await mountPanels({ withCover: true });
+  const original = (await decl.invoke('places', 'export', [])).bundle;
+  const backup = structuredClone(original);
+  backup.state.places.find((p) => p.id === 'forest-creek').desc = '准备恢复的覆盖描写';
+  const root = await mount();
+  await waitFor(() => root.textContent.includes('暂无导入恢复点'));
+  assert.equal(invocations.filter((r) => r.method === 'recoveryInfo').length, 1);
+  assert.equal(invocations.filter((r) => r.method === 'restore').length, 0);
+  const mode = field(root, '导入模式'); mode.value = 'overwrite';
+  const file = selectImportFile(root, backup);
+  await waitFor(() => !button(root, '确认导入').disabled);
+  button(root, '确认导入').fire('click');
+  await waitFor(() => root.textContent.includes('导入成功') && !button(root, '预览恢复上次导入前').disabled);
+  const coverCalls = invocations.filter((r) => r.method === 'cover').length;
+  button(root, '预览恢复上次导入前').fire('click');
+  await waitFor(() => button(root, '确认恢复导入前状态'));
+  assert.match(root.textContent, /恢复影响：5 处 → 5 处/);
+  assert.match(root.textContent, /恢复：.*溪边/);
+  assert.equal(invocations.filter((r) => r.method === 'restore').length, 0);
+  const approved = invocations.find((r) => r.method === 'previewRestore').result;
+  const invoke = ctx.invoke;
+  const gate = deferred(); let writes = 0;
+  ctx.invoke = async (method, args) => {
+    if (method === 'restore') { ++writes; await gate.promise; }
+    return invoke(method, args);
+  };
+  const confirm = button(root, '确认恢复导入前状态');
+  confirm.fire('click'); confirm.fire('click');
+  assert.equal(writes, 1);
+  assert.equal(file.disabled, true); assert.equal(mode.disabled, true);
+  intervals[0].fn(); await flushEvents();
+  assert.equal(field(root, '导入 JSON'), file);
+  gate.resolve();
+  await waitFor(() => root.textContent.includes('恢复成功') && !file.disabled);
+  assert.deepEqual(invocations.find((r) => r.method === 'restore').args, [{ expectedRevision: approved.expectedRevision }]);
+  const restored = (await decl.invoke('places', 'export', [])).bundle;
+  assert.equal(restored.state.places.find((p) => p.id === 'forest-creek').desc, original.state.places.find((p) => p.id === 'forest-creek').desc);
+  await waitFor(() => invocations.filter((r) => r.method === 'cover').length > coverCalls, '恢复刷新图片缓存');
+});
+
+test('恢复预览后的后续编辑被服务端拒绝，失败保留本地表单，刷新显示不可一键恢复', async () => {
+  const { mount, decl, tool, invocations } = await mountPanels();
+  const backup = (await decl.invoke('places', 'export', [])).bundle;
+  backup.state.places.find((p) => p.id === 'forest-home').desc = '导入住所描写';
+  const root = await mount();
+  await waitFor(() => field(root, '导入 JSON'));
+  selectImportFile(root, backup);
+  await waitFor(() => !button(root, '确认导入').disabled);
+  button(root, '确认导入').fire('click');
+  await waitFor(() => root.textContent.includes('导入成功') && !button(root, '预览恢复上次导入前').disabled);
+  const card = root.querySelectorAll('.map-card').find((n) => n.textContent.includes('溪边'));
+  card.fire('click');
+  await waitFor(() => field(root, '描写'));
+  type(field(root, '描写'), '恢复失败也保留我的未保存表单');
+  button(root, '预览恢复上次导入前').fire('click');
+  await waitFor(() => button(root, '确认恢复导入前状态'));
+  await tool('map_edit')({ place: '老橡树', desc: '导入后的独立编辑' });
+  button(root, '确认恢复导入前状态').fire('click');
+  await waitFor(() => root.querySelector('.map-transfer').querySelector('.map-err'));
+  assert.equal(invocations.find((r) => r.method === 'restore').result.ok, false);
+  assert.equal(field(root, '描写').value, '恢复失败也保留我的未保存表单');
+  assert.equal((await decl.invoke('places', 'list', [])).places.find((p) => p.id === 'forest-old-oak').desc, '导入后的独立编辑');
+  await waitFor(() => root.textContent.includes('可先导出当前备份'));
+  assert.equal(button(root, '预览恢复上次导入前').disabled, true);
+  assert.equal(button(root, '确认恢复导入前状态'), undefined);
 });
 
 await report();

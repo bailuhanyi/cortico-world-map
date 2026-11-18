@@ -54,8 +54,7 @@ export const DEFAULTS = Object.freeze({
    */
   mapFunOn: true,
   /**
-   * 整图样式参考（方案 §4「选择 3 的可选加成」）。
-   * **这一版只留字段不实现**——空=各地点用自己的 `style`。
+   * 世界默认文字画风；地点 style 非空时优先使用地点设置。
    */
   mapStyleRef: '',
 });
@@ -77,8 +76,8 @@ const ZH = {
     mapFeastOnDesc: '开着时会提醒她写日程、说「此刻在哪」都用这些地点正名。关掉就一个字都不提鱼的每一天——即便装了也不提。',
     mapFunOn: '跟「娱乐时间」对齐',
     mapFunOnDesc: '旅游那几处会顺带提一句「想真去逛就填娱乐时间里最接近的那处」。关掉就不提娱乐时间——即便装了也不提。',
-    mapStyleRef: '整图样式参考',
-    mapStyleRefDesc: '留空=每个地点用自己的画风锚点。这一版只留了这个字段，暂时不影响回执。',
+    mapStyleRef: '世界默认画风（文字）',
+    mapStyleRefDesc: '填写一句统一的文字画风，地点未单独填写画风时使用它；地点自己的画风优先。已有图片不会改变。留空则只用地点画风。',
   },
   storage: {
     label: '地点记录',
@@ -103,8 +102,8 @@ const EN = {
     mapFeastOnDesc: 'When on, she is reminded to use these place names when writing her day and when saying where she is. Off: not a word about Fish Every Day, even when it is installed.',
     mapFunOn: 'Align with Fun time',
     mapFunOnDesc: 'Travel places mention the nearest place she can actually visit in Fun time. Off: nothing about Fun time, even when it is installed.',
-    mapStyleRef: 'Whole-map style reference',
-    mapStyleRefDesc: 'Empty means every place uses its own style line. The field exists this version but does not change any receipt yet.',
+    mapStyleRef: 'World default style (text)',
+    mapStyleRefDesc: 'A shared text style for places without their own style. A place-specific style takes priority. Existing photos stay unchanged. Leave empty to use only place styles.',
   },
   storage: {
     label: 'Place records',

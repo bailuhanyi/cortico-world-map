@@ -25,6 +25,8 @@
  */
 import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { createHash } from 'node:crypto';
+import { buildExport, prepareImport } from './transfer.js';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULTS, ID, configGroup, panelText, text } from './config.js';
@@ -33,13 +35,14 @@ import {
 } from './places.js';
 import {
   MAX_ALIASES, addPlace, applyTerrain, applyTerrainSelection, editPlace, kindLabelOf, listPlaces,
-  newState, normalizeKind, normalizeState, placeById, placeView, removePlace, resolvePlace,
+  newState, normalizeKind, normalizeState, placeById, placeView, removePlace, resolvePlace, resolvePlaceCandidates,
   setCover, summaryOf,
 } from './state.js';
 
 const ENV_PROMPT = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
 const msg = (err) => (err instanceof Error ? err.message : String(err));
+const revisionOf = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 /** 本地图的最大字节数（方案 §4：≤ 8 MiB）。 */
 export const MAX_COVER_BYTES = 8 * 1024 * 1024;
@@ -145,27 +148,15 @@ export function readImggenEnabled(dataDir) {
 /** 三档 kind 的展示顺序。 */
 const KIND_ORDER = ['home', 'frequent', 'around', 'travel'];
 
-/**
- * 常驻前缀里每处地点最多带几个字的描写。
- *
- * 只够「认出是哪处」；完整描写永远由 `map_look` 现给。
- * 不改这个值会让常驻前缀随描写长度线性膨胀（实测 25 处 × 400 字 ≈ 9k tokens，每轮都付）。
- */
-const ENV_DESC_CHARS = 40;
+/** 常驻只保留当前住所与五处常去地点索引；所有详情按需查询。 */
+const ENV_FREQUENT_MAX = 5;
+const LIST_PAGE_SIZE = 10;
+const LIST_PAGE_MAX = 20;
 
 /**
- * 常驻前缀里最多列几处地点。
+ * `map_view` 完整概览回执里每处带几个字的描写。
  *
- * 超过就用「还有 N 处」带过——`MAX_PLACES` 是 60，全列进去会白白撑爆前缀。
- * 这条和 `ENV_DESC_CHARS` 一起把常驻部分的大小**钉成常数级**。
- */
-const ENV_PLACES_MAX = 20;
-
-/**
- * `map_places` / `map_view` 回执里每处带几个字的描写。
- *
- * 这两个工具是**清单**不是详情：认得出是哪处就够，完整描写由 `map_look` 现给。
- * 不截的话 25 处 × 200 字实测约 3.5–5k tokens 一次回执，而她只是想知道「有哪些地方」。
+ * 概览仅给短描写，完整描写由 `map_look` 现给；`map_places` 只返回索引。
  */
 const LIST_DESC_CHARS = 60;
 
@@ -181,15 +172,19 @@ export const MAP_TOOL_DECLS = [
   {
     name: 'map_places',
     tags: ['read', 'snapshot'],
-    description: '看看周围有哪些地方：家、常去的、附近的、去远处旅行的。每处给一句文字描写、有没有图、是不是常去。默认按「常去 > 家 > 周围 > 旅行」排；想只看一类就填 kind。没有路线、没有远近，也没有「怎么走」。',
+    description: '分页查询地点索引：名称、id、分类、常去及有图状态。按常去优先排序，详情用 map_look。',
     parameters: {
       type: 'object',
       properties: {
         kind: {
           type: 'string',
-          description: '只看某一类：家 / 常去的 / 周围 / 旅行（英文 home / frequent / around / travel 也认）。不填就全列。',
+          description: '分类筛选：家 / 常去的 / 周围 / 旅行，或 home / frequent / around / travel；不填则不限分类。',
         },
-        all: { type: 'boolean', description: '填 true 就列全部，否则也只列全部（这里没有截断，留着这个参数是为了和别的工具一致）。' },
+        all: { type: 'boolean', description: 'true 返回筛选后的全部索引，忽略分页；默认分页。' },
+        page: { type: 'integer', minimum: 1, description: '页码，从 1 开始，默认 1。' },
+        limit: { type: 'integer', minimum: 1, maximum: 20, description: '每页条数，默认 10，最多 20。' },
+        tag: { type: 'string', description: '只列包含这个标签的地点。' },
+        relatedTo: { type: 'string', description: '只列与这个地点有主人登记关联的地点 id。' },
       },
       additionalProperties: false,
     },
@@ -197,7 +192,7 @@ export const MAP_TOOL_DECLS = [
   {
     name: 'map_look',
     tags: ['read', 'snapshot'],
-    description: '看某一处长什么样：回执给这一处的文字描写、画风锚点、有没有图。写日程说「此刻在哪」、或者想发图之前用它。这处还空着的时候会明说空着——别替主人编一段描写。',
+    description: '查询地点完整描写、有效画风、标签、关联和图片状态；具体描述或发图前使用。空白内容不得编造。',
     parameters: {
       type: 'object',
       properties: {
@@ -210,7 +205,7 @@ export const MAP_TOOL_DECLS = [
   {
     name: 'map_add',
     tags: ['write'],
-    description: '加一处地方。只填文字：名字、别名、属于哪一类（家 / 常去的 / 周围 / 旅行）、一句描写、一句画风锚点。**不填坐标、不填路线、不填多远**——这个插件没有这些。',
+    description: '按主人要求新增文字地点；不登记坐标、路线或距离。',
     parameters: {
       type: 'object',
       properties: {
@@ -222,6 +217,7 @@ export const MAP_TOOL_DECLS = [
         scene: { type: 'string', description: '生图素材库里的场景正名，**主人知道库里有什么才填**；拿不准就别填，留空不影响任何事。' },
         funVenue: { type: 'string', description: '娱乐时间里**最接近这处**的那个场所正名（例如「江边」「爬山」）；填了才可能提「想真去逛去哪」，拿不准就别填。' },
         frequent: { type: 'boolean', description: '是不是常去（置顶）。' },
+        tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 24 }, description: '主人自定义标签，最多 8 个。' },
       },
       required: ['name'],
       additionalProperties: false,
@@ -230,7 +226,7 @@ export const MAP_TOOL_DECLS = [
   {
     name: 'map_edit',
     tags: ['write'],
-    description: '改某一处的文字：描写、画风锚点、别名、归类、是否常去、scene 正名、娱乐时间那处。只改传进来的那几项，没传的一个字都不动。要换图用 map_cover。',
+    description: '按主人要求修改地点，仅更新传入字段；数组整套替换。换图用 map_cover。',
     parameters: {
       type: 'object',
       properties: {
@@ -243,6 +239,15 @@ export const MAP_TOOL_DECLS = [
         scene: { type: 'string', description: '换成这个 scene 正名；传空串就是清掉（以后不再提发图填什么）。' },
         funVenue: { type: 'string', description: '换成娱乐时间里最接近这处的那一处正名；传空串就是清掉（以后不再提去那儿逛）。' },
         frequent: { type: 'boolean', description: '标成 / 取消「常去」。' },
+        tags: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 24 }, description: '整套替换主人自定义标签；空数组清空。' },
+        relations: {
+          type: 'array', maxItems: 8,
+          description: '主人明确要求时登记地点关联；整套替换，空数组清空。只写两处的语境说明，不写方向、远近或走法，不能自行推断长期事实。',
+          items: { type: 'object', properties: {
+            placeId: { type: 'string', description: '已存在的目标地点 id，用 map_places 确认，不填名字。' },
+            note: { type: 'string', maxLength: 80, description: '关联说明，例如“窗边能看见溪面”；不含方位、距离或路径。' },
+          }, required: ['placeId', 'note'], additionalProperties: false },
+        },
       },
       required: ['place'],
       additionalProperties: false,
@@ -251,7 +256,7 @@ export const MAP_TOOL_DECLS = [
   {
     name: 'map_cover',
     tags: ['write'],
-    description: '这处地方的图：换成本地的一张、或者清空。**图是主人从面板上传的**，不是这里画的；你来这里只做两件事——把主人放好的那张挂上去，或者清空。清空之后主人才可以再放一张新的（有图的时候它锁死，不会自己变）。',
+    description: '查询封面，或按主人明确要求挂载已上传的本地图片、清空封面；不生成图片，不自动改图。',
     parameters: {
       type: 'object',
       properties: {
@@ -278,6 +283,10 @@ export class MapWorld {
   #host = null;
   #state = null;
   #started = false;
+  #storageWarning = '';
+  #drafts = new Map();
+  #writeBlocked = false;
+  #lastSaved = null;
   #queue = Promise.resolve();
   #now;
   #persist = null;
@@ -360,6 +369,11 @@ export class MapWorld {
 
   coversDir() {
     return join(this.dataDir, 'map', 'covers');
+  }
+
+  /** 最近一次成功导入前的快照（只给面板「恢复上次导入前」用）。 */
+  recoveryFile() {
+    return join(this.dataDir, 'map', 'import-recovery.json');
   }
 
   // -------------------------------------------------------------------------
@@ -479,39 +493,24 @@ export class MapWorld {
       const places = listPlaces(st);
       if (!this.#on() || !places.length) return empty;
 
-      // ---- 截断：这是**常驻**前缀，每轮都付钱 ----
-      //
-      // 方案 §6 写的是「只列名字 + 一句**短**描写，细节留给 map_look」。
-      // 之前把整段 `desc`（上限 400 字）都塞在这里，实测 25 处 × 400 字 ≈ 6.6–9.4k tokens，
-      // 每一轮都要付一遍。现在：
-      //   · 每处描写只取开头 ENV_DESC_CHARS 字（够认出是哪处，细节叫 map_look）；
-      //   · 清单最多列 ENV_PLACES_MAX 处，其余让她用 map_places 看全。
-      // 这样常驻部分与「地点数 × 描写长度」脱钩，兜住了上限。
-      const shown = places.slice(0, ENV_PLACES_MAX);
-      const lines = ['（周围的地方：）'];
-      for (const p of shown) {
-        const alias = p.aliases.length ? `（也叫 ${p.aliases.slice(0, 3).join('、')}）` : '';
-        const pin = p.frequent ? '★' : '';
-        const pic = p.cover ? ' 有图' : '';
-        // 这处有没有 scene 只在「可以提生图」时说出来；否则连这个词都不出现。
-        const scene = this.canMentionImggen(p) ? ` 生图 scene 填「${p.scene}」` : '';
-        let desc = '：还没写描写';
-        if (p.desc) desc = `：${briefDesc(p.desc, ENV_DESC_CHARS)}`;
-        lines.push(`- ${pin}${p.name}${alias}${pic}${desc}${scene}`);
-      }
-      if (places.length > shown.length) {
-        lines.push(`（还有 ${places.length - shown.length} 处没列出来——map_places 能看全。）`);
-      }
+      const home = placeById(st, st.homeId);
+      const currentHome = home?.kind === 'home' ? home : null;
+      const shown = places.filter((p) => p.id !== currentHome?.id && (p.frequent || p.kind === 'frequent')).slice(0, ENV_FREQUENT_MAX);
+      const lines = [`地点共 ${places.length} 处。`];
+      if (currentHome) lines.push(`当前住所：${currentHome.name}（id=${currentHome.id}）。家、家里、回家指这一处；明确指定其他地点时按指定查询。`);
+      if (shown.length) lines.push('常去地点索引：');
+      for (const p of shown) lines.push(`- ${p.name}（id=${p.id}）`);
+      lines.push('其余地点用 map_places 分页查询；描写、画风、标签和关联用 map_look 查询，索引未列出不代表不存在。');
 
       const imggen = this.canMentionAnyImggen()
         ? [
           '## 想发图的时候',
           '',
-          '`imggen_draw` 的 `scene` 填上面写明的那个正名，别自己编地方。',
+          '发图前先用 map_look 查询地点；仅当回执提供 scene 时才用于 imggen_draw，不编造场景正名。',
           this.canMentionFeast()
             ? '`outfits` 填 `feast_life_now` 里那身，别自己编衣服。'
             : '`outfits` 按你这会儿真穿的那身填，别自己编衣服名字。',
-          '上面**没写** scene 的那几处，就是素材库里没有——把地方写进 `prompt` 就行，别硬填一个库里没有的名字。',
+          '登记的场景名未经本插件核实；画风按 map_look 回执填写。',
         ].join('\n')
         : '';
 
@@ -520,7 +519,7 @@ export class MapWorld {
         ? [
           '## 写日程、说此刻在哪的时候',
           '',
-          '地点用上面清单里的**正名**（「家」「溪边」「老橡树」），别自己发明一个不在清单里的地名。',
+          '地点用登记的**正名**；索引未列出的先用 map_places 查询，不自行发明地名。',
           '`feast_life_plan` 交回的每一段、`feast_life_now` 回答「我这会儿在哪」时，`location` 都用同一个正名——这样第二天的你和主人都对得上同一个地方。',
         ].join('\n')
         : '';
@@ -567,6 +566,7 @@ export class MapWorld {
 
   async #tool(name, args) {
     this.#ensureStarted();
+    if (['map_add', 'map_edit', 'map_cover'].includes(name)) this.#ensureWritable();
     switch (name) {
       case 'map_places': return { text: this.#placesText(args) };
       case 'map_look': return { text: this.#lookText(args) };
@@ -597,22 +597,26 @@ export class MapWorld {
     if (rawKind && !kind) {
       return `没有「${rawKind.slice(0, 20)}」这一类。能填的是：家 / 常去的 / 周围 / 旅行。`;
     }
-    const picks = kind ? all.filter((p) => p.kind === kind) : all;
-    if (!picks.length) {
-      const have = [...new Set(all.map((p) => kindLabelOf(p.kind)))].join(' / ');
-      return `「${kindLabelOf(kind)}」这一类现在一处都没有。现在有的是：${have}。`;
+    const tag = typeof args?.tag === 'string' ? args.tag.trim() : '';
+    const relatedTo = typeof args?.relatedTo === 'string' ? args.relatedTo.trim() : '';
+    const picks = all.filter((p) => (!kind || p.kind === kind)
+      && (!tag || (p.tags ?? []).includes(tag))
+      && (!relatedTo || (p.relations ?? []).some((r) => r.placeId === relatedTo)));
+    const unpaged = args?.all === true;
+    const page = args?.page ?? 1;
+    const limit = args?.limit ?? LIST_PAGE_SIZE;
+    if (!unpaged && (!Number.isSafeInteger(page) || page < 1)) return '[map_places 失败] page 必须是从 1 开始的整数。';
+    if (!unpaged && (!Number.isSafeInteger(limit) || limit < 1 || limit > LIST_PAGE_MAX)) return `[map_places 失败] limit 必须是 1 至 ${LIST_PAGE_MAX} 的整数。`;
+    if (!picks.length) return '没有符合筛选条件的地点。';
+    const pages = Math.ceil(picks.length / limit);
+    if (!unpaged && page > pages) return `匹配 ${picks.length} 处，共 ${pages} 页；请使用 1 至 ${pages} 的 page。`;
+    const shown = unpaged ? picks : picks.slice((page - 1) * limit, page * limit);
+    const lines = [`地点共 ${all.length} 处，匹配 ${picks.length} 处${unpaged ? '（全部）' : `，第 ${page}/${pages} 页`}：`];
+    for (const p of shown) {
+      lines.push(`- ${p.name}（id=${p.id}）［${kindLabelOf(p.kind)}］${p.frequent ? '★常去' : ''} ${p.cover ? '有图' : '还没图'}`);
     }
-
-    const lines = [`周围一共 ${all.length} 处地方${kind ? `，这里只列「${kindLabelOf(kind)}」这几处` : ''}：`];
-    for (const p of picks) {
-      const bits = [p.name];
-      if (p.aliases.length) bits.push(`（也叫 ${p.aliases.slice(0, 3).join('、')}）`);
-      bits.push(`［${kindLabelOf(p.kind)}］`);
-      if (p.frequent) bits.push('★常去');
-      lines.push(`- ${bits.join('')}${p.desc ? `：${briefDesc(p.desc, LIST_DESC_CHARS)}` : '：还没写描写'}`);
-      lines.push(`  ${p.cover ? '有图' : '还没图'}${p.style ? ` · 画风：${p.style}` : ''}`);
-    }
-    lines.push('想看某一处具体长什么样：map_look（place 填正名）。');
+    if (!unpaged && page < pages) lines.push(`下一页：map_places 保持筛选条件，page=${page + 1}，limit=${limit}。`);
+    lines.push('详情用 map_look（place 填 id；正名或别名也可，同名须明确 id）。');
     return lines.join('\n');
   }
 
@@ -625,10 +629,7 @@ export class MapWorld {
     }
     const name = typeof args?.place === 'string' ? args.place : '';
     const place = resolvePlace(st, name);
-    if (!place) {
-      const names = listPlaces(st).slice(0, 8).map((p) => p.name).join(' / ');
-      return `没有「${String(name).slice(0, 40)}」这一处。周围有的是：${names}。`;
-    }
+    if (!place) return this.#missingPlace(name);
 
     const lines = [`${place.name}［${kindLabelOf(place.kind)}］${place.frequent ? ' ★常去' : ''}`];
     if (place.aliases.length) lines.push(`也叫：${place.aliases.join('、')}`);
@@ -638,10 +639,13 @@ export class MapWorld {
       // 空着就明说空着。**绝不替主人编一段描写**——这一处是他的地方。
       lines.push('（这处还没写描写。等主人补一句「什么样」，别替他想——那是他的地方，不是你的。）');
     }
-    if (place.style) lines.push(`画风：${place.style}`);
+    if (this.#effectiveStyle(place)) lines.push(`画风：${this.#effectiveStyle(place)}`);
+    if (place.tags?.length) lines.push(`标签：${place.tags.join('、')}`);
+    const relations = this.#relationLines(place);
+    if (relations.length) lines.push('关联地点（仅按主人登记的说明）：\n' + relations.join('\n'));
 
     lines.push(place.cover
-      ? `这处有图：${place.cover}（主人放的，就照这张看）。`
+      ? `这处有图：${place.cover}（主人上传，面板可查看；本次回执没有附图片，不能声称已看见图片内容，外观以已登记描写为准）。`
       : '这处还没图。图要主人从面板上传一张，你自己变不出来。');
 
     // 发图那句：三条全满足才出现（mapImggenOn + worlds.imggen.enabled + scene 非空）。
@@ -662,6 +666,40 @@ export class MapWorld {
     return lines.join('\n');
   }
 
+  #relationError(place, value) {
+    if (!Array.isArray(value) || value.length > 8) return '地点关联必须是最多 8 条的列表';
+    const normalized = normalizePlace({ ...place, relations: value }).relations;
+    if (normalized.length !== value.length || value.some((r) => typeof r?.note !== 'string' || r.note.trim().length > 80)) {
+      return '关联无效：请选择不同的已有地点，并填写 1–80 字说明；不能重复、自身关联或填写方位、路程信息';
+    }
+    if (normalized.some((r) => !placeById(this.#state, r.placeId))) return '关联目标已不存在，请重新选择地点';
+    return '';
+  }
+
+  #relationLines(place) {
+    const relations = Array.isArray(place?.relations) ? place.relations : [];
+    return relations.flatMap((relation) => {
+      const target = placeById(this.#state, relation.placeId);
+      return target && relation.note ? [`- ${place.name} 与 ${target.name}：${relation.note}`] : [];
+    });
+  }
+
+  #effectiveStyle(place) {
+    return place?.style || (typeof this.cfg.mapStyleRef === 'string' ? this.cfg.mapStyleRef.replace(/\s+/g, ' ').trim().slice(0, 160) : '');
+  }
+
+  #missingPlace(name) {
+    if (['家', '家里', '回家'].includes(typeof name === 'string' ? name.trim() : '') && this.#state?.homeId) {
+      const currentHome = placeById(this.#state, this.#state.homeId);
+      if (currentHome) return `当前住所是「${currentHome.name}」（id=${currentHome.id}）。需要别处时请用明确地点名或 id。`;
+    }
+    const candidates = resolvePlaceCandidates(this.#state, name);
+    if (candidates.length > 1) {
+      return `「${String(name).slice(0, 40)}」对应多处地方，请用明确的 id 选择：${candidates.map((p) => `${p.name}［${findTerrain(p.terrain)?.label || kindLabelOf(p.kind)}］ id=${p.id}`).join(' / ')}。`;
+    }
+    return `没有「${String(name).slice(0, 40)}」这一处。周围有的是：${listPlaces(this.#state).slice(0, 8).map((p) => `${p.name}（${p.id}）`).join(' / ')}。`;
+  }
+
   // ---- map_add -----------------------------------------------------------
 
   async #addText(args) {
@@ -674,6 +712,7 @@ export class MapWorld {
       scene: args?.scene,
       funVenue: args?.funVenue,
       frequent: args?.frequent,
+      tags: args?.tags,
     };
     const { place, error } = addPlace(this.#state, input, this.#now());
     if (error) return `${error}。\n（拿不准就 map_places 看看现在有哪些地方。）`;
@@ -682,7 +721,7 @@ export class MapWorld {
     if (place.aliases.length) lines.push(`也叫：${place.aliases.join('、')}`);
     if (place.desc) lines.push(place.desc);
     else lines.push('（描写还空着，等主人补一句。别替他写。）');
-    if (place.style) lines.push(`画风：${place.style}`);
+    if (this.#effectiveStyle(place)) lines.push(`画风：${this.#effectiveStyle(place)}`);
     // scene / funVenue 都只在「三条全满足」时提（和 map_look 用同一个判据）。
     // 不满足时连这个词都不出现——否则等于告诉她「有个叫 scene 的东西可以填」，
     // 而那个东西这会儿根本用不上。
@@ -701,16 +740,17 @@ export class MapWorld {
   async #editText(args) {
     const name = typeof args?.place === 'string' ? args.place : '';
     const place = resolvePlace(this.#state, name);
-    if (!place) {
-      const names = listPlaces(this.#state).slice(0, 8).map((p) => p.name).join(' / ');
-      return `没有「${String(name).slice(0, 40)}」这一处。周围有的是：${names || '（还没有）'}。`;
+    if (!place) return this.#missingPlace(name);
+    if (args && Object.hasOwn(args, 'relations')) {
+      const relationError = this.#relationError(place, args.relations);
+      if (relationError) return `${relationError}。`;
     }
     const patch = {};
-    for (const key of ['name', 'aliases', 'kind', 'desc', 'style', 'scene', 'funVenue', 'frequent']) {
+    for (const key of ['name', 'aliases', 'kind', 'desc', 'style', 'scene', 'funVenue', 'frequent', 'tags', 'relations']) {
       if (args && key in args) patch[key] = args[key];
     }
     if (!Object.keys(patch).length) {
-      return '没说要改什么。能改的是：描写、画风锚点、别名、归类、是否常去、scene 正名、funVenue——要换图用 map_cover。';
+      return '没说要改什么。能改的是：描写、画风锚点、别名、归类、是否常去、scene 正名、funVenue、地点关联——要换图用 map_cover。';
     }
     const { changed, error } = editPlace(this.#state, place.id, patch, this.#now());
     if (error) return `${error}。`;
@@ -718,10 +758,11 @@ export class MapWorld {
     await this.#save();
     const LABEL = {
       name: '正名', aliases: '别名', kind: '归类', desc: '描写', style: '画风',
-      scene: '场景名', funVenue: '娱乐时间那处', frequent: '常去',
+      scene: '场景名', funVenue: '娱乐时间那处', frequent: '常去', relations: '地点关联',
     };
     const out = [
       `改了「${place.name}」：${changed.map((k) => LABEL[k] ?? k).join('、')}。`,
+      ... (changed.includes('relations') ? this.#relationLines(place) : []),
       place.desc ? `现在那句：${place.desc}` : '（描写现在是空的，等主人补。）',
       place.cover ? `图没动：${place.cover}（有图就锁着，要换得先 map_cover 清空）。` : '这处还没图。',
     ];
@@ -740,10 +781,7 @@ export class MapWorld {
   async #coverText(args) {
     const name = typeof args?.place === 'string' ? args.place : '';
     const place = resolvePlace(this.#state, name);
-    if (!place) {
-      const names = listPlaces(this.#state).slice(0, 8).map((p) => p.name).join(' / ');
-      return `没有「${String(name).slice(0, 40)}」这一处。周围有的是：${names || '（还没有）'}。`;
-    }
+    if (!place) return this.#missingPlace(name);
 
     if (args?.clear === true) {
       const before = place.cover;
@@ -803,6 +841,7 @@ export class MapWorld {
       for (const p of group) {
         const pin = p.frequent ? '★' : '·';
         lines.push(`${pin} ${p.name}${p.cover ? ' 📷' : ''}${p.desc ? `：${briefDesc(p.desc, LIST_DESC_CHARS)}` : '：还没写描写'}`);
+        lines.push(...this.#relationLines(p));
       }
     }
     lines.push('\n（只是一张地方清单，纯展示：谁和谁都不相连。）');
@@ -837,15 +876,6 @@ export class MapWorld {
     if (decoded.error) return { ok: false, error: decoded.error };
     const dir = this.coversDir();
     await mkdir(dir, { recursive: true });
-    // 换扩展名时先把同名旧图删掉，免得目录里留着两张都是 <id>.* 的。
-    try {
-      const old = await readdir(dir);
-      for (const n of old) {
-        if (n.startsWith(`${placeId}.`) && n !== `${placeId}.${decoded.ext}`) {
-          await unlink(join(dir, n)).catch(() => {});
-        }
-      }
-    } catch { /* 目录都不存在就算了 */ }
     const file = `${placeId}.${decoded.ext}`;
     const target = join(dir, file);
     const tmp = `${target}.tmp`;
@@ -854,6 +884,12 @@ export class MapWorld {
     const { cover, error } = setCover(this.#state, placeId, file, this.#now());
     if (error) return { ok: false, error };
     await this.#save();
+    // 新图和引用都保存成功后才清理旧扩展名，写入失败时保留原图。
+    try {
+      for (const n of await readdir(dir)) {
+        if (n.startsWith(`${placeId}.`) && n !== file) await unlink(join(dir, n)).catch(() => {});
+      }
+    } catch { /* 清理不影响已保存的新图 */ }
     return { ok: true, cover, mime: decoded.mime, bytes: decoded.bytes.length };
   }
 
@@ -886,21 +922,68 @@ export class MapWorld {
   // -------------------------------------------------------------------------
 
   async #load() {
-    try {
-      const raw = JSON.parse(await readFile(this.stateFile(), 'utf8'));
+    const file = this.stateFile();
+    this.#storageWarning = '';
+    this.#writeBlocked = false;
+    this.#lastSaved = null;
+    const parse = (source) => {
+      const raw = JSON.parse(source);
+      if (!raw || typeof raw !== 'object' || !Array.isArray(raw.places)) {
+        throw new Error('地点记录格式不完整');
+      }
       return normalizeState(raw);
-    } catch {
+    };
+    let source;
+    let primaryError;
+    try {
+      source = await readFile(file, 'utf8');
+      const state = parse(source);
+      this.#lastSaved = JSON.stringify(state, null, 2);
+      if (state.homeId && !state.places.some((p) => p.id === state.homeId && p.kind === 'home')) state.homeId = '';
+      return state;
+    } catch (err) {
+      primaryError = err;
+    }
+    try {
+      const backup = parse(await readFile(`${file}.bak`, 'utf8'));
+      if (backup.homeId && !backup.places.some((p) => p.id === backup.homeId && p.kind === 'home')) backup.homeId = '';
+      // 恢复前保留原始文件，避免正常保存掩盖损坏证据。
+      if (source !== undefined) {
+        await writeFile(`${file}.corrupt-${Date.now()}`, source, { encoding: 'utf8', flag: 'wx' });
+      } else if (primaryError?.code !== 'ENOENT') {
+        throw primaryError;
+      }
+      this.#lastSaved = JSON.stringify(backup, null, 2);
+      this.#storageWarning = '地点记录读取失败，已从上一次保存的备份恢复；原文件已保留（如存在）。';
+      this.#host?.log?.warn?.(this.#storageWarning);
+      return backup;
+    } catch (backupError) {
+      if (primaryError?.code === 'ENOENT' && backupError?.code === 'ENOENT') return newState();
+      this.#writeBlocked = true;
+      this.#storageWarning = '地点记录无法读取，已保护原文件并暂停写入。请修复记录或备份后重新启动世界。';
+      this.#host?.log?.warn?.(this.#storageWarning, { err: msg(primaryError) });
       return newState();
     }
   }
 
+  #ensureWritable() {
+    if (this.#writeBlocked) throw new Error(this.#storageWarning);
+  }
+
   async #save() {
-    if (!this.#state) return;
+    if (!this.#state || this.#writeBlocked) return;
     const file = this.stateFile();
+    const next = JSON.stringify(this.#state, null, 2);
+    if (next === this.#lastSaved) return;
     await mkdir(dirname(file), { recursive: true });
+    if (this.#lastSaved !== null) {
+      await writeFile(`${file}.bak.tmp`, this.#lastSaved, 'utf8');
+      await rename(`${file}.bak.tmp`, `${file}.bak`);
+    }
     const tmp = `${file}.tmp`;
-    await writeFile(tmp, JSON.stringify(this.#state, null, 2), 'utf8');
+    await writeFile(tmp, next, 'utf8');
     await rename(tmp, file);
+    this.#lastSaved = next;
   }
 
   #serial(task) {
@@ -938,9 +1021,9 @@ export class MapWorld {
         { label: t.badgeCover, value: `${s.withCover}/${s.total}`, tone: s.withCover ? 'plain' : 'off' },
       ],
       panels: [
-        { id: 'places', title: p.places.title, description: p.places.description, getMethods: ['list', 'cover'] },
+        { id: 'places', title: p.places.title, description: p.places.description, getMethods: ['list', 'cover', 'drafts', 'export'] },
       ],
-      invoke: (panel, method, args) => this.#invoke(panel, method, args ?? []),
+      invoke: (panel, method, args) => this.#serial(() => this.#invoke(panel, method, args ?? [])),
       config: [configGroup(this.language)],
       promptDocs: [{
         key: `worlds.${ID}.env`,
@@ -985,6 +1068,7 @@ export class MapWorld {
       await this.#refreshInstalled();
       if (panel !== 'places') throw new Error(`不认识的面板：${panel}`);
       const a = Array.isArray(args) ? (args[0] ?? {}) : (args ?? {});
+      if (!['list', 'cover', 'drafts', 'saveDrafts', 'export', 'previewImport', 'recoveryInfo', 'previewRestore'].includes(method)) this.#ensureWritable();
       switch (method) {
         case 'list': return this.#listData();
         case 'cover': return await this.#readCover(String(a.id ?? ''));
@@ -995,6 +1079,24 @@ export class MapWorld {
         case 'remove': return await this.#panelRemove(String(a.id ?? ''));
         case 'frequent': return await this.#panelFrequent(String(a.id ?? ''), a.on === true);
         case 'terrain': return await this.#panelTerrain(a);
+        case 'setHome': return await this.#setHome(String(a.id ?? ''));
+        case 'drafts': return { ok: true, drafts: [...this.#drafts].map(([id, fields]) => ({ id, fields })) };
+        case 'saveDrafts': return await this.#saveDrafts(a.drafts);
+        case 'export': return { ok: true, bundle: await buildExport(this.#state, (_filename, place) => this.#readCover(place.id)) };
+        case 'previewImport': {
+          const plan = prepareImport(this.#state, a.bundle, { mode: a.mode, decisions: a.decisions });
+          return {
+            ok: true,
+            summary: plan.summary,
+            items: plan.items,
+            expectedRevision: revisionOf([this.#state, a.bundle, a.mode ?? 'skip', a.decisions ?? null]),
+          };
+        }
+        case 'import': return await this.#importBundle(a);
+        case 'recoveryInfo': return await this.#recoveryInfo();
+        case 'previewRestore': return await this.#previewRestore();
+        case 'restore': return await this.#restore(a);
+        case 'removeDraft': return await this.#saveDrafts([...this.#drafts].filter(([id]) => id !== String(a.id ?? '')).map(([id, fields]) => ({ id, fields })));
         default: throw new Error(`places 没有 ${method} 这个方法`);
       }
     } catch (err) {
@@ -1009,6 +1111,7 @@ export class MapWorld {
     return {
       ok: true,
       on: this.#on(),
+      storageWarning: this.#storageWarning,
       // 三个联动的实况：面板据此决定要不要显示那一列说明。
       installed: {
         imggen: this.imggenInstalled,
@@ -1041,13 +1144,149 @@ export class MapWorld {
         })),
       })),
       summary: sum,
+      homeId: st.homeId ?? '',
+      stateRevision: revisionOf(st),
       places: places.map((p) => ({
-        ...placeView(p),
+        revision: revisionOf(p),
+        ...placeView(p, st),
+        effectiveStyle: this.#effectiveStyle(p),
+        terrainLabel: findTerrain(p.terrain)?.label ?? '',
         // 每处单独再判一次：面板上「这处能不能提 scene / 去哪逛」和工具回执用同一个判据。
         canMentionImggen: this.canMentionImggen(p),
         canMentionFun: this.canMentionFun(p),
       })),
     };
+  }
+
+  async #setHome(id) {
+    const place = placeById(this.#state, id);
+    if (id && place?.kind !== 'home') return { ok: false, error: '请选择归类为家的地点' };
+    this.#state.homeId = id;
+    this.#state.updatedAt = this.#now();
+    await this.#save();
+    return { ok: true, homeId: id };
+  }
+
+  async #saveDrafts(drafts) {
+    if (!Array.isArray(drafts) || drafts.length > 61) throw new Error('草稿数量无效');
+    const clean = new Map();
+    const limits = { name: 40, desc: 400, style: 160, aliases: 300, kind: 20, scene: 40, funVenue: 40, tags: 240, relationsJson: 1600 };
+    for (const entry of drafts) {
+      if (!entry || typeof entry.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(entry.id) || entry.id.includes('..')) continue;
+      const fields = {};
+      for (const [key, limit] of Object.entries(limits)) {
+        if (typeof entry.fields?.[key] === 'string') fields[key] = entry.fields[key].slice(0, limit);
+      }
+      if (Object.keys(fields).length) clean.set(entry.id, fields);
+    }
+    if (JSON.stringify([...clean]) === JSON.stringify([...this.#drafts])) return { ok: true };
+    const file = join(this.dataDir, 'map', 'drafts.json');
+    await mkdir(dirname(file), { recursive: true });
+    await writeFile(`${file}.tmp`, JSON.stringify({ version: 1, drafts: [...clean].map(([id, fields]) => ({ id, fields })) }), 'utf8');
+    await rename(`${file}.tmp`, file);
+    this.#drafts = clean;
+    return { ok: true };
+  }
+
+  async #importBundle(a) {
+    if (a.expectedRevision !== revisionOf([this.#state, a.bundle, a.mode ?? 'skip', a.decisions ?? null])) return { ok: false, error: '地点、文件或导入模式已变化，请重新预览导入', conflict: true };
+    const plan = prepareImport(this.#state, a.bundle, { mode: a.mode, decisions: a.decisions });
+    const previous = structuredClone(this.#state);
+    if (!this.#state.homeId && plan.state.homeId) {
+      const namedHome = plan.state.places.find((p) => p.id === plan.state.homeId);
+      if (namedHome && previous.places.some((p) => p.name === namedHome.name && p.id !== namedHome.id)) {
+        plan.state.homeId = '';
+        plan.summary.conflicts.push(`当前住所「${namedHome.name}」与现有地点重名；导入后请在面板明确指定住所`);
+      }
+    }
+    await mkdir(this.coversDir(), { recursive: true });
+    for (const image of plan.images) {
+      const target = join(this.coversDir(), image.filename);
+      await writeFile(`${target}.tmp`, image.bytes);
+      await rename(`${target}.tmp`, target);
+    }
+    this.#state = plan.state;
+    this.#state.updatedAt = this.#now();
+    try { await this.#save(); } catch (err) { this.#state = previous; throw err; }
+    try { await this.#writeRecovery(previous); } catch (err) { this.#host?.log?.warn?.('小地图：导入前恢复点没保存成功', { err: msg(err) }); }
+    return { ok: true, summary: plan.summary };
+  }
+
+  /** 导入成功后记下「导入前」那份状态，供面板一次性回退。 */
+  async #writeRecovery(before) {
+    const file = this.recoveryFile();
+    await mkdir(dirname(file), { recursive: true });
+    const payload = {
+      version: 1,
+      createdAt: new Date(this.#now()).toISOString(),
+      before,
+      after: revisionOf(this.#state),
+    };
+    await writeFile(`${file}.tmp`, JSON.stringify(payload), 'utf8');
+    await rename(`${file}.tmp`, file);
+  }
+
+  async #readRecovery() {
+    try {
+      const raw = JSON.parse(await readFile(this.recoveryFile(), 'utf8'));
+      if (!raw || typeof raw !== 'object' || !raw.before || !Array.isArray(raw.before.places)) return null;
+      return raw;
+    } catch {
+      return null;
+    }
+  }
+
+  async #recoveryInfo() {
+    const data = await this.#readRecovery();
+    if (!data) return { ok: true, available: false, canRestore: false };
+    const canRestore = data.after === revisionOf(this.#state);
+    return {
+      ok: true,
+      available: true,
+      canRestore,
+      createdAt: data.createdAt ?? '',
+      total: data.before.places.length,
+      reason: canRestore ? '' : '导入后地点已被修改，无法一键恢复',
+    };
+  }
+
+  async #previewRestore() {
+    const data = await this.#readRecovery();
+    if (!data) return { ok: false, error: '暂无导入恢复点' };
+    const current = this.#state;
+    const before = data.before;
+    const currentById = new Map(current.places.map((place) => [place.id, place]));
+    const beforeById = new Map(before.places.map((place) => [place.id, place]));
+    const removed = current.places.filter((place) => !beforeById.has(place.id)).map((place) => place.name);
+    const restored = before.places
+      .filter((place) => {
+        const now = currentById.get(place.id);
+        return !now || JSON.stringify(now) !== JSON.stringify(place);
+      })
+      .map((place) => place.name);
+    return {
+      ok: true,
+      expectedRevision: revisionOf([current, before]),
+      summary: {
+        beforeCount: current.places.length,
+        afterCount: before.places.length,
+        removed,
+        restored,
+      },
+    };
+  }
+
+  async #restore(a) {
+    const data = await this.#readRecovery();
+    if (!data) return { ok: false, error: '暂无导入恢复点' };
+    if (a.expectedRevision !== revisionOf([this.#state, data.before])) {
+      return { ok: false, error: '恢复点或地点已变化，请重新预览恢复', conflict: true };
+    }
+    this.#state = structuredClone(data.before);
+    this.#state.updatedAt = this.#now();
+    await this.#save();
+    try { await unlink(this.recoveryFile()); } catch { /* 已经没了就算了 */ }
+    return { ok: true };
   }
 
   async #uploadFromPanel(id, dataUrl) {
@@ -1075,23 +1314,32 @@ export class MapWorld {
       scene: a.scene,
       funVenue: a.funVenue,
       frequent: a.frequent,
+      tags: a.tags,
     }, this.#now());
     if (error) return { ok: false, error };
     await this.#save();
-    return { ok: true, place: placeView(place) };
+    return { ok: true, place: placeView(place, this.#state) };
   }
 
   async #panelEdit(a) {
     const place = placeById(this.#state, String(a.id ?? '')) ?? resolvePlace(this.#state, a.id);
     if (!place) return { ok: false, error: `没有这一处（${String(a.id ?? '')}）` };
+    if (Object.hasOwn(a, 'relations')) {
+      const relationError = this.#relationError(place, a.relations);
+      if (relationError) return { ok: false, error: relationError };
+    }
+    const currentRevision = revisionOf(place);
+    if (a.expectedRevision !== undefined && a.expectedRevision !== currentRevision) {
+      return { ok: false, conflict: true, current: { ...placeView(place, this.#state), revision: currentRevision } };
+    }
     const patch = {};
-    for (const key of ['name', 'aliases', 'kind', 'desc', 'style', 'scene', 'funVenue', 'frequent']) {
+    for (const key of ['name', 'aliases', 'kind', 'desc', 'style', 'scene', 'funVenue', 'frequent', 'tags', 'relations']) {
       if (key in a) patch[key] = a[key];
     }
     const { error, changed } = editPlace(this.#state, place.id, patch, this.#now());
     if (error) return { ok: false, error };
     if (changed.length) await this.#save();
-    return { ok: true, changed, place: placeView(placeById(this.#state, place.id)) };
+    return { ok: true, changed, place: { ...placeView(placeById(this.#state, place.id), this.#state), revision: revisionOf(place) } };
   }
 
   async #panelRemove(id) {
@@ -1119,7 +1367,7 @@ export class MapWorld {
   async #panelTerrain(a) {
     const id = typeof a?.id === 'string' ? a.id : '';
     const ids = Array.isArray(a?.ids) ? a.ids.filter((x) => typeof x === 'string') : null;
-    const { added, terrain, skipped, error } = applyTerrainSelection(this.#state, id, ids, this.#now());
+    const { added, terrain, skipped, error } = applyTerrainSelection(this.#state, id, ids, this.#now(), { withDescriptions: a.withDescriptions === true });
     if (error) return { ok: false, error };
     if (added.length) await this.#save();
     return {
@@ -1133,6 +1381,7 @@ export class MapWorld {
 
   /** 清空地点记录（存储页「清掉」）。只清 state 这一份，不碰别的 World。 */
   async #clearState() {
+    this.#ensureWritable();
     this.#state = newState();
     await this.#save();
     this.#host?.log?.info?.('小地图：地点记录已清空');
@@ -1148,6 +1397,10 @@ export class MapWorld {
     this.#host = host;
     this.#ensureConfigSection();
     this.#state = await this.#load();
+    try {
+      const draftFile = JSON.parse(await readFile(join(this.dataDir, 'map', 'drafts.json'), 'utf8'));
+      this.#drafts = new Map((draftFile.drafts ?? []).filter((d) => d && typeof d.id === 'string' && d.fields).map((d) => [d.id, d.fields]));
+    } catch { this.#drafts = new Map(); }
     // 三个联动装没装：启动时读一次（只读 config 的布尔字段）。
     await this.#refreshInstalled(true).catch(() => {});
     this.#started = true;
@@ -1159,6 +1412,7 @@ export class MapWorld {
   }
 
   async stop() {
+    await this.#queue;
     this.#started = false;
     try { await this.#save(); } catch { /* 停的时候存不上就算了 */ }
     this.#host = null;

@@ -10,7 +10,7 @@
  *   D. 回执里不出现路线/坐标/距离字眼（需求红线的第二道守门）。
  */
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -219,11 +219,14 @@ test('envPromptVars：没 start 也能调，不抛错，三个键都在', async 
   assert.equal(v.map_feast_block, '');
 });
 
-test('envPromptVars：有地点时列正名，且不注入时是空串', async () => {
+test('envPromptVars：只列当前住所及常去正名，不列普通地点', async () => {
   const { world } = await makeWorld({ imggen: false, terrain: 'forest' });
+  assert.equal((await world.webUi('zh').invoke('places', 'setHome', [{ id: 'forest-home' }])).ok, true);
   const v = world.envPromptVars();
-  assert.ok(v.map_places_block.includes('溪边'), v.map_places_block);
+  assert.ok(!v.map_places_block.includes('溪边'), v.map_places_block);
+  assert.ok(v.map_places_block.includes('forest-home'));
   assert.ok(v.map_places_block.includes('家'));
+  assert.match(v.map_places_block, /5/);
   assert.equal(v.map_imggen_block, '', '没装生图 → 那句整段不出现');
   assert.ok(!v.map_places_block.includes('imggen_draw'), '没装就一个字都不提生图');
   assert.ok(!v.map_places_block.includes('scene'), '没装就不该出现 scene 这个词');
@@ -353,7 +356,7 @@ test('map_places：空地图给的是「怎么开始」，不是报错', async (
   assert.ok(r.text.includes('预设地形') || r.text.includes('map_add'), '该告诉她怎么开始');
 });
 
-test('map_places：列全部、kind 筛、认不出的 kind 给提示', async () => {
+test('map_places：小地图默认一页、kind 筛、认不出的 kind 给提示', async () => {
   const { tools } = await makeWorld({ imggen: false, terrain: 'forest' });
   const all = await tools.map_places({});
   assert.ok(all.text.includes('溪边') && all.text.includes('老橡树'), all.text);
@@ -365,6 +368,84 @@ test('map_places：列全部、kind 筛、认不出的 kind 给提示', async ()
 
   const bad = await tools.map_places({ kind: '火星' });
   assert.ok(bad.text.includes('没有'), bad.text);
+});
+
+/** 从索引条目取 id，不把页码、提示文字当作地点。 */
+function listedIds(text) {
+  return [...text.matchAll(/^- .*?（id=([^）]+)）/gm)].map((match) => match[1]);
+}
+
+async function makePagedWorld() {
+  const ctx = await makeWorld({ terrain: 'forest' });
+  for (const terrain of ['neighborhood', 'riverside', 'foothill', 'travel']) {
+    assert.equal((await ctx.world.webUi('zh').invoke('places', 'terrain', [{ id: terrain }])).ok, true);
+  }
+  return ctx;
+}
+
+test('map_places：默认十条、末页、越界、最大二十条及 all 兼容', async () => {
+  const { tools } = await makePagedWorld();
+  const first = await tools.map_places({});
+  const second = await tools.map_places({ page: 2 });
+  const last = await tools.map_places({ page: 3 });
+  assert.equal(listedIds(first.text).length, 10);
+  assert.equal(listedIds(second.text).length, 10);
+  assert.equal(listedIds(last.text).length, 5);
+  assert.match(first.text, /匹配 25 处/);
+  assert.match(first.text, /下一页.*page=2.*limit=10/);
+  assert.doesNotMatch(last.text, /下一页/);
+  const all = await tools.map_places({ all: true });
+  assert.equal(listedIds(all.text).length, 25);
+  assert.deepEqual([...listedIds(first.text), ...listedIds(second.text), ...listedIds(last.text)], listedIds(all.text));
+  assert.doesNotMatch(all.text, /下一页/);
+  assert.equal(listedIds((await tools.map_places({ limit: 20 })).text).length, 20);
+  assert.equal(listedIds((await tools.map_places({ page: 2, limit: 20 })).text).length, 5);
+  assert.equal(listedIds((await tools.map_places({ page: 25, limit: 1 })).text).length, 1);
+  const outside = await tools.map_places({ page: 4 });
+  assert.equal(listedIds(outside.text).length, 0);
+  assert.match(outside.text, /25.*3/);
+  assert.match(outside.text, /page/);
+  const view = await tools.map_view({});
+  const names = [...all.text.matchAll(/^- (.*?)（id=/gm)].map((match) => match[1]);
+  const viewNames = [...view.text.matchAll(/^[·★] (.*?)：/gm)].map((match) => match[1]);
+  assert.deepEqual(viewNames.sort(), names.sort(), '整图完整展示所有地点，包括同名住所');
+  for (const group of ['家', '周围', '旅行']) assert.ok(view.text.includes(`【${group}】`));
+});
+
+test('map_places：非法 page/limit 给明确失败文字', async () => {
+  const { tools } = await makeWorld({ terrain: 'forest' });
+  for (const field of ['page', 'limit']) {
+    const invalid = [0, -1, 1.5, '2', true, {}, [], NaN, Infinity, Number.MAX_SAFE_INTEGER + 1];
+    if (field === 'limit') invalid.push(21);
+    for (const value of invalid) {
+      const r = await tools.map_places({ [field]: value });
+      assert.match(r.text, /失败/, `${field}=${String(value)}`);
+      assert.ok(r.text.includes(field), r.text);
+      assert.equal(listedIds(r.text).length, 0);
+    }
+  }
+});
+
+test('map_places：kind、tag、relatedTo 先筛选再分页，all 仍遵守筛选', async () => {
+  const { world, tools } = await makePagedWorld();
+  const places = (await world.webUi('zh').invoke('places', 'list')).places;
+  const selected = places.filter((p) => p.kind === 'around').slice(0, 7);
+  for (const p of selected) await tools.map_edit({ place: p.id, tags: ['青苔'], relations: [{ placeId: 'travel-seaside-town', note: '共享相册记忆' }] });
+  for (const filter of [{ kind: 'around' }, { tag: '青苔' }, { relatedTo: 'travel-seaside-town' }, { kind: 'around', tag: '青苔', relatedTo: 'travel-seaside-town' }]) {
+    const all = await tools.map_places({ ...filter, all: true });
+    const ids = listedIds(all.text);
+    assert.equal(ids.length, filter.tag || filter.relatedTo ? 7 : 16);
+    const combined = [];
+    for (let page = 1; page <= Math.ceil(ids.length / 3); page += 1) {
+      const r = await tools.map_places({ ...filter, page, limit: 3 });
+      assert.ok(r.text.includes(`匹配 ${ids.length} 处`), r.text);
+      combined.push(...listedIds(r.text));
+    }
+    assert.deepEqual(combined, ids, '过滤后页间不能重复或遗漏');
+  }
+  const none = await tools.map_places({ tag: '不存在的标签' });
+  assert.equal(listedIds(none.text).length, 0);
+  assert.match(none.text, /没有/);
 });
 
 test('map_look：没写描写时明说空着，绝不替主人编', async () => {
@@ -680,32 +761,56 @@ test('守门断言：旅游预设的文案里没有「几天/行程/怎么去/�
 const LONG_DESC = '窗台上有几盆花，光从东边斜进来，地板是旧的木条，踩上去有点响，墙角堆着几个纸箱，'
   + '桌上摊着一本翻到一半的书，杯子里的水凉了，椅背上搭着一条毯子，窗玻璃上有一层灰。';
 
-test('常驻注入块：描写被截到 40 字，完整描写不进去', async () => {
-  // 不截的话 25 处 × 400 字实测约 6.6–9.4k tokens，每轮都付。
-  const { world, tools } = await makeWorld({ imggen: true, terrain: 'forest' });
-  await tools.map_edit({ place: '溪边', desc: LONG_DESC });
-  const block = world.envPromptVars().map_places_block;
-  assert.ok(block.includes('…'), '长描写该带省略号');
-  assert.ok(!block.includes(LONG_DESC), '完整描写不该整段进常驻前缀');
-  // 每行里 desc 部分不超过 40 字 + 省略号
-  const line = block.split('\n').find((l) => l.includes('溪边'));
-  const desc = line.slice(line.indexOf('：') + 1).replace(/…$/, '');
-  assert.ok(desc.length <= 40, `这行描写该 ≤40 字，实际 ${desc.length}`);
+test('富数据不增加 env 负载，详情、面板与落盘完整保留', async () => {
+  const { world, tools } = await makeWorld({ imggen: true, feast: true, terrain: 'forest' });
+  await tools.map_edit({ place: 'forest-creek', frequent: true, scene: '原场景' });
+  const before = world.envPromptVars();
+  const rich = {
+    desc: LONG_DESC.repeat(4).slice(0, 400), aliases: ['独有溪水别称'], tags: ['独有青苔标签'],
+    style: '独有水墨画风', scene: '独有场景正名',
+    relations: [{ placeId: 'forest-home', note: '窗边能看见溪面' }],
+  };
+  await tools.map_edit({ place: 'forest-creek', ...rich });
+  world.cfg.mapStyleRef = '独有世界默认画风';
+  assert.deepEqual(world.envPromptVars(), before, '丰富字段不应改变常驻文本');
+  assert.match(before.map_imggen_block, /map_look/);
+  assert.match(before.map_feast_block, /map_places/);
+  const list = (await tools.map_places({ all: true })).text;
+  const look = (await tools.map_look({ place: '独有溪水别称' })).text;
+  for (const value of [rich.desc, ...rich.aliases, ...rich.tags, rich.style, rich.scene, rich.relations[0].note]) {
+    assert.ok(!list.includes(value.slice(0, 20)), `索引不带详情：${value.slice(0, 20)}`);
+    assert.ok(look.includes(value), `详情保留：${value.slice(0, 20)}`);
+  }
+  const saved = JSON.parse(await readFile(world.stateFile(), 'utf8')).places.find((p) => p.id === 'forest-creek');
+  const panel = (await world.webUi('zh').invoke('places', 'list')).places.find((p) => p.id === 'forest-creek');
+  for (const [key, value] of Object.entries(rich)) {
+    assert.deepEqual(saved[key], value, `落盘保留 ${key}`);
+    assert.deepEqual(panel[key], value, `面板保留 ${key}`);
+  }
 });
 
-test('常驻注入块：超过 20 处只列 20 处，其余用「还有 N 处」带过', async () => {
-  const { world, tools } = await makeWorld({ imggen: false, terrain: 'forest' });
-  for (let i = 0; i < 20; i += 1) await tools.map_add({ name: `补的第${i + 1}处` });
-  const block = world.envPromptVars().map_places_block;
-  const listed = block.split('\n').filter((l) => l.startsWith('- ')).length;
-  assert.equal(listed, 20, `最多列 20 处，实际 ${listed}`);
-  assert.ok(/还有 \d+ 处没列出来/.test(block), `该说明还有几处没列：\n${block.slice(-120)}`);
-  assert.ok(block.includes('map_places'), '该指向 map_places 看全');
+test('常驻索引：两种常去来源都认，最多五处且排除当前住所', async () => {
+  const { world, tools } = await makeWorld({ terrain: 'forest' });
+  await world.webUi('zh').invoke('places', 'setHome', [{ id: 'forest-home' }]);
+  await tools.map_edit({ place: 'forest-home', frequent: true });
+  await tools.map_edit({ place: 'forest-creek', frequent: true });
+  await tools.map_edit({ place: 'forest-old-oak', kind: 'frequent', frequent: false });
+  let block = world.envPromptVars().map_places_block;
+  assert.ok(block.includes('溪边（id=forest-creek）'));
+  assert.ok(block.includes('老橡树（id=forest-old-oak）'));
+  assert.equal(block.split('id=forest-home').length - 1, 1);
+  assert.ok(!block.includes('forest-mushroom-slope'));
+  for (let i = 0; i < 8; i += 1) await tools.map_add({ name: `常去补充${i}`, frequent: true });
+  block = world.envPromptVars().map_places_block;
+  assert.equal(block.split('\n').filter((line) => line.startsWith('- ')).length, 5);
+  assert.equal(block.split('id=forest-home').length - 1, 1);
+  assert.match(block, /13/);
+  assert.match(block, /map_places/);
 });
 
 test('守门断言：常驻前缀不随「描写长度」膨胀，且总量有上限', async () => {
   // 两条：
-  //   ① 不变量：同样 20 处，描写从 0 字变 400 字，注入块只该涨「截断后那点」，
+  //   ① 不变量：地点不变，描写从 0 字变 400 字，注入块完全不增长，
   //      不许按描写长度线性膨胀（旧行为：25 处 × 400 字 ≈ 30 KB / 9.4k tokens）；
   //   ② 上限：60 处 × 400 字时仍 ≤ 5 KB。
   const build = async (n, descLen) => {
@@ -723,25 +828,24 @@ test('守门断言：常驻前缀不随「描写长度」膨胀，且总量有�
   // ① 不变量：5 处短描写 vs 5 处 400 字描写
   const plain = await build(5, 0);
   const long = await build(5, 400);
-  const growth = (long - plain) / plain;
-  assert.ok(growth < 1.2, `描写从 0 变 400 字，注入块涨了 ${(growth * 100).toFixed(0)}%——截断失效了？`);
+  assert.equal(long, plain, '描写长度不得增加常驻负载');
 
   // ② 上限：60 处（MAX_PLACES）× 400 字
   const worst = await build(60, 400);
   assert.ok(worst <= 5000, `60 处 × 400 字时注入块 ${worst} B，超过 5000 B 上限`);
 });
 
-test('map_places / map_view：清单里描写被截到 60 字，完整描写仍然从 map_look 拿得到', async () => {
+test('map_places 不带描写，map_view 仍截 60 字，map_look 保留全文', async () => {
   const { tools } = await makeWorld({ imggen: false, terrain: 'forest' });
   await tools.map_edit({ place: '溪边', desc: LONG_DESC });
   const list = await tools.map_places({});
   assert.ok(!list.text.includes(LONG_DESC), `清单不该带完整描写：\n${list.text}`);
-  const line = list.text.split('\n').find((l) => l.includes('溪边'));
-  const desc = line.slice(line.indexOf('：') + 1).replace(/…$/, '');
-  assert.ok(desc.length <= 60, `清单里该 ≤60 字，实际 ${desc.length}`);
+  assert.ok(!list.text.includes(LONG_DESC.slice(0, 10)), '索引连描写摘要都不带');
 
   const view = await tools.map_view({});
   assert.ok(!view.text.includes(LONG_DESC), '整张图也不该带完整描写');
+  assert.ok(view.text.includes(LONG_DESC.slice(0, 60) + '…'), '整张图保留 60 字描写摘要');
+  assert.ok(!view.text.includes(LONG_DESC.slice(0, 61)), '摘要不可超过 60 字');
 
   // 详情永远给全文
   const look = await tools.map_look({ place: '溪边' });
@@ -767,7 +871,7 @@ test('守门断言：六个工具的回执里都没有路线/坐标/距离字眼
 test('守门断言：ENV_PROMPT 里没有「从这里走十分钟 / 导航到 X」这种教她编路的话', async () => {
   const { readFile } = await import('node:fs/promises');
   const prompt = await readFile(fileURLToPath(new URL('../src/ENV_PROMPT.md', import.meta.url)), 'utf8');
-  assert.ok(prompt.includes('没有路线'), '要明确说这里有路线这件事');
+  assert.match(prompt, /(?:没有|不提供)[^。\n]*路线/, '要明确说明不提供路线');
   // 路线字眼只许出现在「不许这么说」的否定语境里。
   // 逐句判：句子里出现路线字眼时，同一句必须带否定词（不 / 别 / 没有 / 无）。
   for (const line of prompt.split('\n')) {
@@ -903,6 +1007,168 @@ test('读图：文件被删掉时面板拿到「没图」，不报错', async ()
   const back = await world.webUi('zh').invoke('places', 'cover', [{ id: 'forest-creek' }]);
   assert.equal(back.ok, true, '文件没了也不该报错');
   assert.equal(back.dataUrl, '');
+});
+
+test('同名地点必须明确选择，id 修改独立', async () => {
+  const { world, tools } = await makeWorld({ terrain: 'forest' });
+  await world.webUi('zh').invoke('places', 'terrain', [{ id: 'riverside' }]);
+  for (const name of ['map_look', 'map_edit', 'map_cover']) {
+    const r = await tools[name]({ place: '家', desc: '不该写入', clear: true });
+    assert.match(r.text, /forest-home/); assert.match(r.text, /riverside-home/);
+  }
+  await tools.map_edit({ place: 'riverside-home', desc: '临江的房间' });
+  assert.doesNotMatch((await tools.map_look({ place: 'forest-home' })).text, /临江的房间/);
+});
+
+test('世界默认画风热改、地点优先且不写回继承值', async () => {
+  const { world, tools } = await makeWorld({ terrain: 'forest', cfg: { mapStyleRef: '藏青暖黄绘本' } });
+  assert.match((await tools.map_look({ place: '溪边' })).text, /画风：藏青暖黄绘本/);
+  assert.doesNotMatch(world.envPromptVars().map_places_block, /藏青暖黄绘本/);
+  const list = await world.webUi('zh').invoke('places', 'list');
+  assert.equal(list.places.find((p) => p.id === 'forest-creek').style, '');
+  await tools.map_edit({ place: '溪边', style: '水彩' }); world.cfg.mapStyleRef = '铅笔画';
+  assert.match((await tools.map_look({ place: '溪边' })).text, /画风：水彩/);
+  await tools.map_edit({ place: '溪边', style: '' });
+  assert.match((await tools.map_look({ place: '溪边' })).text, /画风：铅笔画/);
+});
+
+test('示例描写只填新增且默认保持空白', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  await ui.invoke('places', 'terrain', [{ id: 'riverside', withDescriptions: true }]);
+  const list = await ui.invoke('places', 'list');
+  assert.ok(list.places.filter((p) => p.terrain === 'riverside').every((p) => p.desc));
+  assert.ok(list.places.filter((p) => p.terrain === 'forest').every((p) => !p.desc));
+});
+
+test('损坏记录无备份时所有写入口阻断且退出不覆盖原文', async () => {
+  const { world, tools, dataDir } = await makeWorld({ started: false });
+  await mkdir(join(dataDir, 'map'), { recursive: true }); await writeFile(world.stateFile(), '{bad json', 'utf8');
+  await world.start(makeHost()); const ui = world.webUi('zh');
+  assert.match((await ui.invoke('places', 'list')).storageWarning, /暂停写入/);
+  assert.equal((await ui.invoke('places', 'add', [{ name: '新地点' }])).ok, false);
+  assert.equal((await tools.map_add({ name: '新地点' })).failed, true);
+  await world.stop(); assert.equal(await readFile(world.stateFile(), 'utf8'), '{bad json');
+});
+
+test('上一版备份恢复并保留损坏文件，修改后可正常保存', async () => {
+  const { world, tools, dataDir } = await makeWorld({ terrain: 'forest' });
+  await tools.map_edit({ place: '溪边', desc: '备份里的溪水' }); await tools.map_edit({ place: '溪边', desc: '最新的溪水' });
+  await world.stop(); await writeFile(world.stateFile(), '{broken', 'utf8');
+  const recovered = new MapWorld({ dataDir, cfg: { ...DEFAULTS } }); await recovered.start(makeHost());
+  const ui = recovered.webUi('zh'); const list = await ui.invoke('places', 'list');
+  assert.match(list.storageWarning, /备份恢复/);
+  assert.equal(list.places.find((p) => p.id === 'forest-creek').desc, '备份里的溪水');
+  assert.ok((await readdir(join(dataDir, 'map'))).some((name) => name.startsWith('state.json.corrupt-')));
+  await recovered.stop(); assert.equal(await readFile(world.stateFile(), 'utf8'), '{broken');
+  await recovered.start(makeHost()); await ui.invoke('places', 'edit', [{ id: 'forest-creek', desc: '恢复后保存' }]);
+  assert.equal(JSON.parse(await readFile(world.stateFile(), 'utf8')).places.find((p) => p.id === 'forest-creek').desc, '恢复后保存'); await recovered.stop();
+});
+
+test('面板并行写入可串行保存并重启读回', async () => {
+  const { world, dataDir } = await makeWorld(); const ui = world.webUi('zh');
+  const results = await Promise.all(Array.from({ length: 10 }, (_, i) => ui.invoke('places', 'add', [{ name: `并发地点${i}` }])));
+  assert.ok(results.every((r) => r.ok)); await world.stop();
+  const next = new MapWorld({ dataDir, cfg: { ...DEFAULTS } }); await next.start(makeHost());
+  assert.equal((await next.webUi('zh').invoke('places', 'list')).places.length, 10); await next.stop();
+});
+
+test('当前住所泛称解析持久化，明确id仍独立且非home拒绝', async () => {
+  const { world, tools, dataDir } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  await ui.invoke('places', 'terrain', [{ id: 'riverside', withDescriptions: true }]);
+  assert.equal((await ui.invoke('places', 'setHome', [{ id: 'forest-creek' }])).ok, false);
+  assert.equal((await ui.invoke('places', 'setHome', [{ id: 'riverside-home' }])).ok, true);
+  for (const name of ['家', '家里', '回家']) assert.match((await tools.map_look({ place: name })).text, /浅蓝窗帘/);
+  assert.doesNotMatch((await tools.map_look({ place: 'forest-home' })).text, /浅蓝窗帘/);
+  await world.stop(); const next = new MapWorld({ dataDir, cfg: { ...DEFAULTS } }); await next.start(makeHost());
+  assert.equal((await next.webUi('zh').invoke('places', 'list')).homeId, 'riverside-home');
+  await next.webUi('zh').invoke('places', 'remove', [{ id: 'riverside-home' }]);
+  assert.equal((await next.webUi('zh').invoke('places', 'list')).homeId, ''); await next.stop();
+});
+
+test('面板版本检查保护模型更新，刷新版本后可保存', async () => {
+  const { world, tools } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  const before = (await ui.invoke('places', 'list')).places.find((p) => p.id === 'forest-creek');
+  await tools.map_edit({ place: '溪边', desc: '模型更新' });
+  const conflict = await ui.invoke('places', 'edit', [{ id: before.id, expectedRevision: before.revision, desc: '旧草稿' }]);
+  assert.equal(conflict.conflict, true); assert.equal(conflict.current.desc, '模型更新');
+  assert.equal((await ui.invoke('places', 'edit', [{ id: before.id, expectedRevision: conflict.current.revision, desc: '确认内容' }])).ok, true);
+});
+
+test('持久草稿过滤未知字段并可跨重启读取', async () => {
+  const { world, dataDir } = await makeWorld(); const ui = world.webUi('zh');
+  assert.equal((await ui.invoke('places', 'saveDrafts', [{ drafts: [{ id: 'new', fields: { desc: '草稿', cover: 'bad', extra: 'bad' } }, { id: '../bad', fields: { desc: 'bad' } }] }])).ok, true);
+  await world.stop(); const next = new MapWorld({ dataDir, cfg: { ...DEFAULTS } }); await next.start(makeHost());
+  assert.deepEqual((await next.webUi('zh').invoke('places', 'drafts')).drafts, [{ id: 'new', fields: { desc: '草稿' } }]); await next.stop();
+});
+
+test('含封面世界导出导入，过期预览不会写入', async () => {
+  const source = await makeWorld({ terrain: 'forest' }); const sourceUi = source.world.webUi('zh');
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, 3)]);
+  await sourceUi.invoke('places', 'upload', [{ id: 'forest-creek', data: `data:image/png;base64,${png.toString('base64')}` }]);
+  const bundle = (await sourceUi.invoke('places', 'export')).bundle; assert.ok(bundle.covers['forest-creek.png']);
+  const target = await makeWorld(); const ui = target.world.webUi('zh');
+  const preview = await ui.invoke('places', 'previewImport', [{ bundle, mode: 'overwrite' }]);
+  await ui.invoke('places', 'add', [{ name: '预览后新增' }]);
+  assert.equal((await ui.invoke('places', 'import', [{ bundle, mode: 'overwrite', expectedRevision: preview.expectedRevision }])).conflict, true);
+  const fresh = await ui.invoke('places', 'previewImport', [{ bundle, mode: 'overwrite' }]);
+  const changedBundle = structuredClone(bundle);
+  changedBundle.state.places[0].desc = '预览外的更改';
+  assert.equal((await ui.invoke('places', 'import', [{ bundle: changedBundle, mode: 'overwrite', expectedRevision: fresh.expectedRevision }])).conflict, true);
+  assert.equal((await ui.invoke('places', 'import', [{ bundle, mode: 'merge', expectedRevision: fresh.expectedRevision }])).conflict, true);
+  assert.equal((await ui.invoke('places', 'import', [{ bundle, mode: 'overwrite', expectedRevision: fresh.expectedRevision }])).ok, true);
+  assert.equal((await ui.invoke('places', 'cover', [{ id: 'forest-creek' }])).dataUrl, `data:image/png;base64,${png.toString('base64')}`);
+});
+
+test('合并旧备份后重启仍保留自建地点、封面、草稿和本地修改', async () => {
+  const { world, tools, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const bundle = (await ui.invoke('places', 'export')).bundle;
+  await tools.map_add({ name: '用户书房', desc: '用户独有描写', tags: ['私人'] });
+  const custom = (await ui.invoke('places', 'list')).places.find((p) => p.name === '用户书房');
+  await tools.map_edit({ place: 'forest-creek', desc: '后来修改的溪水', tags: ['清静'] });
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, 7)]);
+  const data = `data:image/png;base64,${png.toString('base64')}`;
+  await ui.invoke('places', 'upload', [{ id: custom.id, data }]);
+  await ui.invoke('places', 'saveDrafts', [{ drafts: [{ id: custom.id, fields: { desc: '未保存草稿' } }] }]);
+  const preview = await ui.invoke('places', 'previewImport', [{ bundle, mode: 'merge' }]);
+  assert.equal((await ui.invoke('places', 'import', [{ bundle, mode: 'merge', expectedRevision: preview.expectedRevision }])).ok, true);
+  await world.stop();
+  const next = new MapWorld({ dataDir, cfg: { ...DEFAULTS } }); await next.start(makeHost());
+  const nextUi = next.webUi('zh');
+  const list = await nextUi.invoke('places', 'list');
+  assert.equal(list.places.find((p) => p.id === custom.id).desc, '用户独有描写');
+  assert.equal(list.places.find((p) => p.id === 'forest-creek').desc, '后来修改的溪水');
+  assert.deepEqual(list.places.find((p) => p.id === 'forest-creek').tags, ['清静']);
+  assert.equal((await nextUi.invoke('places', 'cover', [{ id: custom.id }])).dataUrl, data);
+  assert.deepEqual((await nextUi.invoke('places', 'drafts')).drafts, [{ id: custom.id, fields: { desc: '未保存草稿' } }]);
+  await next.stop();
+});
+
+test('地点关联保存重启并同步目标重命名，删除目标立即清理', async () => {
+  const { world, tools, dataDir } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  const before = (await ui.invoke('places', 'list')).places.find((p) => p.id === 'forest-home');
+  await tools.map_edit({ place: 'forest-home', relations: [{ placeId: 'forest-creek', note: '窗边能看见溪面' }] });
+  assert.match((await tools.map_look({ place: 'forest-home' })).text, /窗边能看见溪面/);
+  assert.match((await tools.map_view({})).text, /窗边能看见溪面/);
+  assert.doesNotMatch(world.envPromptVars().map_places_block, /窗边能看见溪面/);
+  assert.equal((await ui.invoke('places', 'edit', [{ id: before.id, expectedRevision: before.revision, desc: '旧版本' }])).conflict, true);
+  await tools.map_edit({ place: 'forest-creek', name: '清溪' });
+  assert.match((await tools.map_look({ place: 'forest-home' })).text, /与 清溪/);
+  await world.stop(); const next = new MapWorld({ dataDir, cfg: { ...DEFAULTS } }); await next.start(makeHost());
+  const nextUi = next.webUi('zh'); assert.equal((await nextUi.invoke('places', 'list')).places.find((p) => p.id === 'forest-home').relations.length, 1);
+  await nextUi.invoke('places', 'remove', [{ id: 'forest-creek' }]);
+  assert.deepEqual((await nextUi.invoke('places', 'list')).places.find((p) => p.id === 'forest-home').relations, []); await next.stop();
+});
+
+test('无效关联整体拒绝且不修改其他字段，空数组明确清空', async () => {
+  const { world, tools } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  for (const relations of [[{ placeId: 'missing', note: '相望' }], [{ placeId: 'forest-creek', note: '向东走十米' }], [{ placeId: 'forest-home', note: '相望' }]]) {
+    const r = await ui.invoke('places', 'edit', [{ id: 'forest-home', desc: '不该保存', relations }]); assert.equal(r.ok, false);
+    assert.doesNotMatch((await tools.map_look({ place: 'forest-home' })).text, /不该保存/);
+  }
+  await tools.map_edit({ place: 'forest-home', relations: [{ placeId: 'forest-creek', note: '窗边能看见溪面' }] });
+  await tools.map_edit({ place: 'forest-home', relations: [] });
+  assert.deepEqual((await ui.invoke('places', 'list')).places.find((p) => p.id === 'forest-home').relations, []);
 });
 
 await report();
