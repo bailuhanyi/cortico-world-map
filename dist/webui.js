@@ -124,6 +124,15 @@ const CSS = `
 .map-terrains{display:flex;gap:6px;flex-wrap:wrap}
 .map-terrain{border-radius:999px!important;padding:4px 11px!important;font-size:12.5px;white-space:nowrap}
 .map-terrain-on{border-color:var(--m-accent)!important;background:color-mix(in srgb,var(--m-accent) 14%,var(--m-card))!important;font-weight:600}
+
+/* 常用筛选：一排圆角按钮，和地形按钮同一套手感（不用 <select> 的老理由仍然成立） */
+.map-quick-filters{display:flex;gap:6px;flex-wrap:wrap;margin:2px 0 8px}
+.map-qf{border-radius:999px!important;padding:3px 10px!important;font-size:12px}
+.map-qf-on{border-color:var(--m-accent)!important;background:color-mix(in srgb,var(--m-accent) 12%,var(--m-card))!important;font-weight:600}
+/* 批量管理：勾上的卡片自己看得出被勾了（真机复选框没反馈，靠边框和底色） */
+.map-batch{align-items:center}
+.map-card-select{cursor:pointer}
+.map-card-selected{border-color:var(--m-accent)!important;background:color-mix(in srgb,var(--m-accent) 7%,var(--m-card))!important}
 `;
 
 /** 面板自己的文案（服务端 config.js 的 panelText 另存一份，改文案时两处一起改）。 */
@@ -197,6 +206,25 @@ const T = {
     retry: '重新载入',
     refresh: '刷新',
     refreshHint: '界面停在旧状态时点这个，不用重开 Coo',
+    // 批量管理
+    batchOpen: '批量管理',
+    batchDone: '完成选择',
+    batchAll: '全选当前筛选',
+    batchNone: '清空选择',
+    batchTagAdd: '加标签',
+    batchTagRemove: '移除标签',
+    batchFrequentOn: '标记常去',
+    batchFrequentOff: '取消常去',
+    batchKind: '改归类',
+    batchTagPlaceholder: '标签（最多 8 个，每处）',
+    batchEmpty: '先勾选要处理的地点',
+    batchDoneMsg: '批量改好了',
+    // 删除撤销
+    undoRemoved: '删掉了',
+    undoButton: '撤销',
+    undoHint: '10 秒内可撤销；期间改动别处会失效。',
+    undoOk: '撤销了，地点回来了',
+    quickFilters: '常用筛选',
   },
   en: {
     title: 'Little World',
@@ -265,6 +293,23 @@ const T = {
     retry: 'Reload',
     refresh: 'Refresh',
     refreshHint: 'Use this when the panel looks stuck; no need to restart Coo',
+    batchOpen: 'Select multiple',
+    batchDone: 'Done selecting',
+    batchAll: 'Select filtered',
+    batchNone: 'Clear selection',
+    batchTagAdd: 'Add tag',
+    batchTagRemove: 'Remove tag',
+    batchFrequentOn: 'Mark frequent',
+    batchFrequentOff: 'Unmark frequent',
+    batchKind: 'Change kind',
+    batchTagPlaceholder: 'Tag (8 per place max)',
+    batchEmpty: 'Tick the places you want to change first',
+    batchDoneMsg: 'Changes applied',
+    undoRemoved: 'Deleted',
+    undoButton: 'Undo',
+    undoHint: 'Undo within 10 seconds; changing another place cancels it.',
+    undoOk: 'Undone — the place is back',
+    quickFilters: 'Quick filters',
   },
 };
 
@@ -373,6 +418,12 @@ function mountPlaces(ctx) {
     pending: new Set(),
     conflicts: new Map(),
     baseRevisions: new Map(),
+    // 批量管理：进入后卡片点击 = 勾选，不再是展开。
+    batchMode: false,
+    selectedIds: new Set(),
+    // 撤销牌：服务端给的 10 秒窗口，`undoTimer` 只负责到点把提示收掉。
+    undo: null,
+    undoTimer: null,
   };
 
   root.replaceChildren();
@@ -804,6 +855,18 @@ function mountPlaces(ctx) {
       onclick: () => { state.adding = !state.adding; render(); },
     }));
 
+    // 批量管理：进得去也要出得来，所以同一个按钮在上面写成「完成选择」。
+    bar.appendChild(el('button', {
+      type: 'button',
+      'aria-pressed': state.batchMode ? 'true' : 'false',
+      text: state.batchMode ? t.batchDone : t.batchOpen,
+      onclick: () => {
+        state.batchMode = !state.batchMode;
+        state.selectedIds.clear();
+        render();
+      },
+    }));
+
     // 手动刷新：万一界面停在旧状态（宿主没刷新、或我们某次渲染出错），
     // 不用重开 Coo 也能自愈。这类「点不动」最后多半是这个救回来的。
     bar.appendChild(el('button', {
@@ -824,6 +887,7 @@ function mountPlaces(ctx) {
       el('option', { value: 'all', text: '全部' }),
       el('option', { value: 'noDesc', text: '缺描写' }),
       el('option', { value: 'noCover', text: '缺图' }),
+      el('option', { value: 'hasCover', text: '有图' }),
       el('option', { value: 'frequent', text: '常去' }));
     filter.value = state.filter ?? 'all';
     const tagSearch = el('input', { type: 'search', placeholder: t.tagQuery, 'aria-label': t.tagQuery,
@@ -836,7 +900,28 @@ function mountPlaces(ctx) {
       el('option', { value: 'cards', text: t.cardsView }), el('option', { value: 'relations', text: t.relationsView }));
     view.value = state.view ?? 'cards';
     head.appendChild(el('div', { class: 'map-bar' }, search, filter, tagSearch, tagFilter, view));
+
+    // 常用筛选：一键切换，不用每次把「条件」重新组一遍。
+    // 和上面那个 <select> 共用 `state.filter`，两处永远同步（点完 head 会重画）。
+    const quickFilters = [
+      ['all', language === 'en' ? 'All' : '全部'],
+      ['frequent', language === 'en' ? 'Frequent' : '常去'],
+      ['hasCover', language === 'en' ? 'With photo' : '有图'],
+      ['noDesc', language === 'en' ? 'Missing description' : '缺描写'],
+    ];
+    head.appendChild(el('div', { class: 'map-quick-filters', role: 'group', 'aria-label': t.quickFilters },
+      ...quickFilters.map(([value, label]) => el('button', {
+        type: 'button',
+        class: (state.filter ?? 'all') === value ? 'map-qf map-qf-on' : 'map-qf',
+        'aria-pressed': (state.filter ?? 'all') === value ? 'true' : 'false',
+        text: label,
+        onclick: () => { state.filter = value; render(); },
+      }))));
+
     head.appendChild(transferControls());
+
+    if (state.batchMode) head.appendChild(batchToolbar());
+    else if (state.undo) head.appendChild(undoBar());
 
     if (state.terrainPick) head.appendChild(picker(state.terrainPick));
     if (state.adding) head.appendChild(addForm());
@@ -853,6 +938,111 @@ function mountPlaces(ctx) {
     state.terrainPick = next;
     state.picked = null; // 换地形就重置勾选（默认全选，见 picker）
     render();
+  }
+
+  /** 批量模式下点卡片 = 勾选/取消，不展开详情。 */
+  function toggleSelect(id) {
+    if (state.selectedIds.has(id)) state.selectedIds.delete(id);
+    else state.selectedIds.add(id);
+    render();
+  }
+
+  /**
+   * 批量改：勾选的 id + 要改的那几项交给服务端。
+   *
+   * 规则不在这里重算：哪处标签会超、哪处已经不在了，都由服务端逐处判定并回报
+   * （`skipped` 带原因），面板只负责说清「改了几处、跳过几处、为什么」。
+   */
+  async function batchApply(patch) {
+    if (!state.selectedIds.size) {
+      setMessage(t.batchEmpty, false);
+      render();
+      return;
+    }
+    try {
+      const r = await call('batchEdit', [{ ids: [...state.selectedIds], ...patch }]);
+      const skipped = Array.isArray(r.skipped) ? r.skipped.length : 0;
+      const why = skipped ? `（跳过 ${skipped} 处：${r.skipped[0].reason}）` : '';
+      setMessage(`${t.batchDoneMsg}：${r.updated} 处${why}`, true);
+      state.batchMode = false;
+      state.selectedIds.clear();
+      await load();
+    } catch (err) {
+      setMessage(String(err?.message ?? err), false);
+      render();
+    }
+  }
+
+  function batchToolbar() {
+    const en = language === 'en';
+    const count = state.selectedIds.size;
+    const tagIn = el('input', { type: 'search', placeholder: t.batchTagPlaceholder, 'aria-label': t.batchTagPlaceholder });
+    const kindSel = el('select', { 'aria-label': t.batchKind },
+      el('option', { value: 'home', text: en ? 'Home' : '家' }),
+      el('option', { value: 'frequent', text: en ? 'Frequent' : '常去的' }),
+      el('option', { value: 'around', text: en ? 'Around' : '周围' }),
+      el('option', { value: 'travel', text: en ? 'Travel' : '旅行' }));
+    const takeTag = () => String(tagIn.value ?? '').trim();
+    return el('div', { class: 'map-bar map-batch' },
+      el('span', { class: 'map-chip', text: `${en ? 'Selected' : '已选'} ${count}${en ? '' : ' 处'}` }),
+      el('button', { type: 'button', text: t.batchAll, onclick: () => { for (const p of filteredPlaces()) state.selectedIds.add(p.id); render(); } }),
+      el('button', { type: 'button', text: t.batchNone, onclick: () => { state.selectedIds.clear(); render(); } }),
+      tagIn,
+      el('button', { type: 'button', text: t.batchTagAdd, onclick: () => { const tag = takeTag(); if (tag) void batchApply({ addTags: [tag] }); } }),
+      el('button', { type: 'button', text: t.batchTagRemove, onclick: () => { const tag = takeTag(); if (tag) void batchApply({ removeTags: [tag] }); } }),
+      el('button', { type: 'button', text: t.batchFrequentOn, onclick: () => { void batchApply({ frequent: true }); } }),
+      el('button', { type: 'button', text: t.batchFrequentOff, onclick: () => { void batchApply({ frequent: false }); } }),
+      kindSel,
+      el('button', { type: 'button', text: t.batchKind, onclick: () => { void batchApply({ kind: kindSel.value }); } }));
+  }
+
+  function clearUndoTimer() {
+    if (state.undoTimer) clearTimeout(state.undoTimer);
+    state.undoTimer = null;
+  }
+
+  /**
+   * 到点把撤销提示收掉。
+   *
+   * 服务端那边同一个 token 也在这时候失效，界面上不该继续摆一个按了必然失败的按钮。
+   */
+  function scheduleUndoClear() {
+    clearUndoTimer();
+    if (!state.undo) return;
+    const left = Math.max(0, Number(state.undo.remainingMs ?? 0));
+    state.undoTimer = setTimeout(() => {
+      state.undo = null;
+      state.undoTimer = null;
+      if (state.data) render();
+    }, left + 50);
+    // 浏览器里没有 unref；Node 里（测试）别让这个 10 秒的定时器把进程多按住。
+    state.undoTimer?.unref?.();
+  }
+
+  function undoBar() {
+    const u = state.undo;
+    return el('div', { class: 'map-msg map-msg-ok' },
+      el('span', { text: `${t.undoRemoved}「${u.name}」` }),
+      el('button', {
+        type: 'button',
+        class: 'map-btn-primary',
+        text: t.undoButton,
+        onclick: async () => {
+          try {
+            await call('undoRemove', [{ token: u.token }]);
+            state.undo = null;
+            clearUndoTimer();
+            setMessage(t.undoOk, true);
+            await load();
+          } catch (err) {
+            state.undo = null;
+            clearUndoTimer();
+            setMessage(String(err?.message ?? err), false);
+            render();
+          }
+        },
+      }),
+      el('span', { class: 'map-note', text: t.undoHint }));
   }
 
   /**
@@ -1050,6 +1240,33 @@ function mountPlaces(ctx) {
   // 卡片墙
   // -------------------------------------------------------------------------
 
+  /**
+   * 当前筛选命中的地点。
+   *
+   * 抽成一个函数是因为「全选当前筛选」和卡片墙必须用**同一套**判据——
+   * 各写一份的话，界面上选中的和实际批量改的会悄悄对不上。
+   */
+  function filteredPlaces() {
+    const d = state.data;
+    const query = String(state.query ?? '').trim().toLocaleLowerCase();
+    const tagQuery = String(state.tagQuery ?? '').trim().toLocaleLowerCase();
+    return d.places.filter((p) => {
+      const terrain = [p.terrain, p.terrainLabel, d.terrainLabel].filter(Boolean).join(' ');
+      const tags = Array.isArray(p.tags) ? p.tags : [];
+      const hay = [p.name, ...(p.aliases ?? []), p.kindLabel, terrain, ...tags].filter(Boolean).join(' ').toLocaleLowerCase();
+      if (query && !hay.includes(query)) return false;
+      if (tagQuery && !tags.some((tag) => tag.toLocaleLowerCase().includes(tagQuery))) return false;
+      if (state.tagFilter && !tags.includes(state.tagFilter)) return false;
+      switch (state.filter ?? 'all') {
+        case 'noDesc': return !String(p.desc ?? '').trim();
+        case 'noCover': return !p.hasCover;
+        case 'hasCover': return Boolean(p.hasCover);
+        case 'frequent': return Boolean(p.frequent);
+        default: return true;
+      }
+    });
+  }
+
   function renderBody() {
     const d = state.data;
     for (const key of forms.keys()) if (key !== 'new') captureDraft(key);
@@ -1060,22 +1277,7 @@ function mountPlaces(ctx) {
         el('strong', { text: t.emptyTitle }), el('div', { text: t.emptyHint })));
       return;
     }
-    const query = String(state.query ?? '').trim().toLocaleLowerCase();
-    const selected = d.places.filter((p) => {
-      const terrain = [p.terrain, p.terrainLabel, d.terrainLabel].filter(Boolean).join(' ');
-      const tags = Array.isArray(p.tags) ? p.tags : [];
-      const text = [p.name, ...(p.aliases ?? []), p.kindLabel, terrain, ...tags].filter(Boolean).join(' ').toLocaleLowerCase();
-      if (query && !text.includes(query)) return false;
-      const tagQuery = String(state.tagQuery ?? '').trim().toLocaleLowerCase();
-      if (tagQuery && !tags.some((tag) => tag.toLocaleLowerCase().includes(tagQuery))) return false;
-      if (state.tagFilter && !tags.includes(state.tagFilter)) return false;
-      switch (state.filter ?? 'all') {
-        case 'noDesc': return !String(p.desc ?? '').trim();
-        case 'noCover': return !p.hasCover;
-        case 'frequent': return Boolean(p.frequent);
-        default: return true;
-      }
-    });
+    const selected = filteredPlaces();
     if (!selected.length) {
       body.appendChild(el('div', { class: 'map-empty', text: '没有符合条件的地点' }));
       return;
@@ -1148,6 +1350,10 @@ function mountPlaces(ctx) {
     if (p.kind === 'home') cls.push('map-card-home');
     else if (p.frequent) cls.push('map-card-freq');
     if (state.expanded === p.id) cls.push('map-card-active');
+    if (state.batchMode) {
+      cls.push('map-card-select');
+      if (state.selectedIds.has(p.id)) cls.push('map-card-selected');
+    }
 
     // 缩略图：缓存里有就同步画，没有就在后面补（不阻塞整面墙渲染）。
     const url = state.covers.get(p.id);
@@ -1168,17 +1374,19 @@ function mountPlaces(ctx) {
     const descCls = p.desc ? 'map-card-desc' : 'map-card-desc map-card-desc-empty';
     return el('div', {
       class: cls.join(' '),
-      role: 'button',
+      role: state.batchMode ? 'checkbox' : 'button',
+      'aria-checked': state.batchMode ? (state.selectedIds.has(p.id) ? 'true' : 'false') : null,
       tabindex: '0',
-      'aria-expanded': state.expanded === p.id ? 'true' : 'false',
-      onclick: () => toggle(p.id),
+      'aria-expanded': state.batchMode ? null : (state.expanded === p.id ? 'true' : 'false'),
+      onclick: () => activateCard(p.id),
       onkeydown: (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
           ev.preventDefault?.();
-          toggle(p.id);
+          activateCard(p.id);
         }
       },
     },
+    state.batchMode ? el('span', { class: 'map-pick-glyph', text: state.selectedIds.has(p.id) ? '☑' : '☐' }) : null,
     thumb,
     el('div', { class: 'map-card-body' },
       el('div', { class: 'map-card-head' },
@@ -1196,6 +1404,12 @@ function mountPlaces(ctx) {
         el('span', { class: 'map-link-status', text: linkStatus(p, 'fun') }),
         // 只有在「三条全满足」时服务端才给 canMentionImggen=true，面板才显示这个 chip。
         p.canMentionImggen ? el('span', { class: 'map-chip map-chip-scene', text: `scene：${p.scene}` }) : null)));
+  }
+
+  /** 点卡片：批量模式下是勾选，平时是展开/收起。 */
+  function activateCard(id) {
+    if (state.batchMode) toggleSelect(id);
+    else toggle(id);
   }
 
   function toggle(id) {
@@ -1391,7 +1605,9 @@ function mountPlaces(ctx) {
           // 删是不可逆的（描写和图一起没），先问一句。
           if (!(await askConfirm(ctx, t.removeConfirm))) return;
           try {
-            await call('remove', [{ id: p.id }]);
+            const r = await call('remove', [{ id: p.id }]);
+            // 服务端给的回执里带一张 10 秒的撤销牌，直接摆到面板上。
+            state.undo = r?.undo ?? null;
             if (state.expanded === p.id) state.expanded = null;
             state.drafts.delete(p.id);
               Promise.resolve(ctx.invoke('removeDraft', [{ id: p.id }])).catch(() => {});
@@ -1399,6 +1615,7 @@ function mountPlaces(ctx) {
             state.covers.delete(p.id);
             setMessage(t.removed, true);
             await load();
+            scheduleUndoClear();
           } catch (err) {
             setMessage(String(err?.message ?? err), false);
             render();
@@ -1492,12 +1709,17 @@ function mountPlaces(ctx) {
       const d = await call('list');
       if (version !== state.loadVersion || ctx.signal?.aborted || state.pending.size) return;
       state.data = d;
+      // 撤销牌以服务端为准：过期了、被新的删除替换了，都从 `list` 里读回来。
+      state.undo = d.undo ?? null;
+      scheduleUndoClear();
       if (!state.draftsLoaded) {
         const saved = await ctx.invoke('drafts', []);
         applyDrafts(Array.isArray(saved) ? saved : saved?.drafts ?? []);
       }
       // 展开着的那一处如果被删了，收起详情。
       if (state.expanded && !d.places.some((p) => p.id === state.expanded)) state.expanded = null;
+      // 勾选名单里已经不存在的 id 要清掉，否则批量改会整批被服务端拒绝。
+      for (const id of [...state.selectedIds]) if (!d.places.some((p) => p.id === id)) state.selectedIds.delete(id);
 
       // 勾选状态要跟着数据走：删掉一处之后它又变回「可以再加」，
       // 而旧的 picked 里可能还留着一个已经不存在的 id（或者反过来）。

@@ -164,6 +164,9 @@ function textList(v, maxItems, maxLen) {
 // Keep relationships descriptive; reject actionable route, measurement, and compass details.
 const RELATION_RESTRICTED = /路线|导航|坐标|左转|右转|距离|路程|公里|千米|几分钟|[\d一二三四五六七八九十百几]+\s*(?:米|分钟|小时)|(?:向|往|朝|正)[东西南北]|[东西南北](?:侧|面|边|方)|(?:左|右)(?:侧|边|面)|\b(?:routes?|navigation|coordinates?|distance|east|west|north|south)\b/i;
 
+/** 每处地点最多几个标签：归一、面板校验和批量编辑共用这一个数。 */
+export const MAX_TAGS = 8;
+
 /** 标签只收纯文本；先检查完整输入，避免截断把红线内容藏在尾部。 */
 export function normalizeTags(value) {
   const out = [];
@@ -175,7 +178,7 @@ export function normalizeTags(value) {
     const tag = Array.from(full).slice(0, 24).join('').trim();
     if (out.includes(tag)) continue;
     out.push(tag);
-    if (out.length >= 8) break;
+    if (out.length >= MAX_TAGS) break;
   }
   return out;
 }

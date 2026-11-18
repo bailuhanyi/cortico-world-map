@@ -69,7 +69,7 @@ function makeHost() {
  * `null` = 不写那个段（模拟没装 / 读不到）。
  */
 async function makeWorld({
-  cfg = {}, imggen = null, feast = null, fun = null, terrain = '', started = true,
+  cfg = {}, imggen = null, feast = null, fun = null, terrain = '', started = true, now = () => NOW,
 } = {}) {
   const worlds = {};
   if (imggen !== null) worlds.imggen = { enabled: imggen };
@@ -81,7 +81,7 @@ async function makeWorld({
     cfg: { ...DEFAULTS, enabled: true, ...cfg },
     dataDir,
     timezone: TZ,
-    now: () => NOW,
+    now,
     persist: () => {},
   });
   if (started) await world.start(host);
@@ -1169,6 +1169,143 @@ test('无效关联整体拒绝且不修改其他字段，空数组明确清空',
   await tools.map_edit({ place: 'forest-home', relations: [{ placeId: 'forest-creek', note: '窗边能看见溪面' }] });
   await tools.map_edit({ place: 'forest-home', relations: [] });
   assert.deepEqual((await ui.invoke('places', 'list')).places.find((p) => p.id === 'forest-home').relations, []);
+});
+
+// ===========================================================================
+// 批量管理：一次改多处的标签 / 常去 / 归类
+// ===========================================================================
+
+test('批量改：标签、常去、归类一次改多处，没传的字段一个都不动', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  const before = (await ui.invoke('places', 'list')).places;
+  const ids = ['forest-creek', 'forest-old-oak', 'forest-home'];
+  const r = await ui.invoke('places', 'batchEdit', [{ ids, addTags: ['水边', '安静'], frequent: true, kind: 'around' }]);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.updated, 3);
+  assert.deepEqual(r.skipped, []);
+  const after = (await ui.invoke('places', 'list')).places;
+  for (const id of ids) {
+    const p = after.find((x) => x.id === id);
+    const old = before.find((x) => x.id === id);
+    assert.deepEqual(p.tags, ['水边', '安静'], `${id} 的标签该是这两条`);
+    assert.equal(p.frequent, true, `${id} 该标成常去`);
+    assert.equal(p.kind, 'around', `${id} 归类该改成周围`);
+    assert.equal(p.desc, old.desc, `${id} 的描写不该被碰`);
+    assert.equal(p.name, old.name, `${id} 的名字不该被碰`);
+    assert.deepEqual(p.aliases, old.aliases, `${id} 的别名不该被碰`);
+  }
+  const untouched = after.filter((p) => !ids.includes(p.id));
+  assert.ok(untouched.length > 0, '应有没被勾选的地点');
+  for (const p of untouched) {
+    assert.deepEqual(p.tags, [], `${p.id} 没被勾选，不该有标签`);
+    assert.equal(p.frequent, false, `${p.id} 没被勾选，不该变常去`);
+  }
+});
+
+test('批量移标签只删指定的那几条，同处别的标签留着', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  await ui.invoke('places', 'batchEdit', [{ ids: ['forest-creek'], addTags: ['水边', '安静', '青石'] }]);
+  const r = await ui.invoke('places', 'batchEdit', [{ ids: ['forest-creek'], removeTags: ['安静'] }]);
+  assert.equal(r.ok, true, r.error);
+  const p = (await ui.invoke('places', 'list')).places.find((x) => x.id === 'forest-creek');
+  assert.deepEqual(p.tags, ['水边', '青石']);
+});
+
+test('批量改：坏输入整次拒绝，一处都不写', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  const before = JSON.stringify((await ui.invoke('places', 'list')).places);
+  const cases = [
+    [{ ids: [], frequent: true }, '空勾选'],
+    [{ ids: ['forest-creek', 'nope'], frequent: true }, '有不存在的 id'],
+    [{ ids: ['forest-creek', 'forest-creek'], frequent: true }, '重复 id'],
+    [{ ids: ['forest-creek'], kind: '火星' }, '归类认不出'],
+    [{ ids: ['forest-creek'] }, '什么都没要改'],
+  ];
+  for (const [args, why] of cases) {
+    const r = await ui.invoke('places', 'batchEdit', [args]);
+    assert.equal(r.ok, false, `${why} 应该被拒绝`);
+    assert.ok(r.error && r.error.length > 0, `${why} 要说清原因`);
+  }
+  assert.equal(JSON.stringify((await ui.invoke('places', 'list')).places), before, '被拒绝的批量改不能动任何数据');
+});
+
+test('批量加标签：已经满 8 个的那一处跳过并说明原因，其余照改', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  const eight = ['a1', 'a2', 'a3', 'a4', 'a5', 'a6', 'a7', 'a8'];
+  await ui.invoke('places', 'batchEdit', [{ ids: ['forest-creek'], addTags: eight }]);
+  assert.deepEqual((await ui.invoke('places', 'list')).places.find((p) => p.id === 'forest-creek').tags, eight);
+  const r = await ui.invoke('places', 'batchEdit', [{ ids: ['forest-creek', 'forest-old-oak'], addTags: ['新标签'] }]);
+  assert.equal(r.ok, true, r.error);
+  assert.equal(r.updated, 1, '只有没满的那一处该被改');
+  assert.equal(r.skipped.length, 1, '满了的那一处要被单独报告');
+  assert.equal(r.skipped[0].id, 'forest-creek');
+  assert.match(r.skipped[0].reason, /8/);
+  const list = (await ui.invoke('places', 'list')).places;
+  assert.deepEqual(list.find((p) => p.id === 'forest-old-oak').tags, ['新标签']);
+  assert.deepEqual(list.find((p) => p.id === 'forest-creek').tags, eight, '满的那处一个标签都不该变');
+});
+
+// ===========================================================================
+// 删除后 10 秒撤销
+// ===========================================================================
+
+test('删掉之后 10 秒内可撤销：地点、图、住所和指向它的关系一起回来', async () => {
+  let clock = NOW;
+  const { world } = await makeWorld({ terrain: 'forest', now: () => clock });
+  const ui = world.webUi('zh');
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, 3)]);
+  const dataUrl = `data:image/png;base64,${png.toString('base64')}`;
+  await ui.invoke('places', 'upload', [{ id: 'forest-creek', data: dataUrl }]);
+  await ui.invoke('places', 'edit', [{ id: 'forest-home', relations: [{ placeId: 'forest-creek', note: '窗边能看见溪面' }] }]);
+  await ui.invoke('places', 'setHome', [{ id: 'forest-home' }]);
+
+  const removed = await ui.invoke('places', 'remove', [{ id: 'forest-creek' }]);
+  assert.equal(removed.ok, true, removed.error);
+  assert.ok(removed.undo?.token, '删除回执里要带撤销牌');
+  let list = await ui.invoke('places', 'list');
+  assert.equal(list.places.some((p) => p.id === 'forest-creek'), false, '删完该不在了');
+  assert.equal(list.undo?.token, removed.undo.token, 'list 里也要能看到撤销牌（面板刷新后还在）');
+  assert.deepEqual(list.places.find((p) => p.id === 'forest-home').relations, [], '删掉目标后关系该被清掉');
+
+  clock += 3000;
+  const back = await ui.invoke('places', 'undoRemove', [{ token: removed.undo.token }]);
+  assert.equal(back.ok, true, back.error);
+  list = await ui.invoke('places', 'list');
+  assert.ok(list.places.some((p) => p.id === 'forest-creek'), '撤销后地点该回来');
+  assert.deepEqual(list.places.find((p) => p.id === 'forest-home').relations,
+    [{ placeId: 'forest-creek', note: '窗边能看见溪面' }], '指向它的关系该一起回来');
+  assert.equal(list.homeId, 'forest-home');
+  assert.equal((await ui.invoke('places', 'cover', [{ id: 'forest-creek' }])).dataUrl, dataUrl, '图该还在');
+  assert.equal(list.undo, null, '撤销之后不该再挂着撤销牌');
+});
+
+test('超过 10 秒就撤不回来，而且一个 token 只能撤销一次', async () => {
+  let clock = NOW;
+  const { world } = await makeWorld({ terrain: 'forest', now: () => clock });
+  const ui = world.webUi('zh');
+  const a = await ui.invoke('places', 'remove', [{ id: 'forest-creek' }]);
+  clock += 10_001;
+  const late = await ui.invoke('places', 'undoRemove', [{ token: a.undo.token }]);
+  assert.equal(late.ok, false, '过期了不该还能撤');
+  assert.match(late.error, /10 秒|过期/);
+  assert.equal((await ui.invoke('places', 'list')).places.some((p) => p.id === 'forest-creek'), false);
+
+  const b = await ui.invoke('places', 'remove', [{ id: 'forest-old-oak' }]);
+  assert.equal((await ui.invoke('places', 'undoRemove', [{ token: b.undo.token }])).ok, true);
+  const again = await ui.invoke('places', 'undoRemove', [{ token: b.undo.token }]);
+  assert.equal(again.ok, false, '撤销过之后同一个 token 不能再用');
+});
+
+test('删完之后又改了别处，撤销会被拒绝，那次修改不会被冲掉', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' }); const ui = world.webUi('zh');
+  const a = await ui.invoke('places', 'remove', [{ id: 'forest-creek' }]);
+  await ui.invoke('places', 'edit', [{ id: 'forest-old-oak', desc: '删完之后又改的' }]);
+  const r = await ui.invoke('places', 'undoRemove', [{ token: a.undo.token }]);
+  assert.equal(r.ok, false, '中间改过别处，撤销就该被拒');
+  assert.match(r.error, /改过|冲掉/);
+  const list = (await ui.invoke('places', 'list')).places;
+  assert.equal(list.find((p) => p.id === 'forest-old-oak').desc, '删完之后又改的', '撤销被拒时那次修改必须还在');
+  assert.equal(list.some((p) => p.id === 'forest-creek'), false);
 });
 
 await report();

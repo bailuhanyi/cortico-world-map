@@ -25,13 +25,13 @@
  */
 import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { buildExport, prepareImport } from './transfer.js';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULTS, ID, configGroup, panelText, text } from './config.js';
 import {
-  KIND_LABEL, TERRAINS, findTerrain, findPlace, hasFunVenue, hasScene, normalizePlace, terrainPlaces,
+  KIND_LABEL, MAX_TAGS, TERRAINS, findTerrain, findPlace, hasFunVenue, hasScene, normalizePlace, normalizeTags, terrainPlaces,
 } from './places.js';
 import {
   MAX_ALIASES, addPlace, applyTerrain, applyTerrainSelection, editPlace, kindLabelOf, listPlaces,
@@ -43,6 +43,14 @@ const ENV_PROMPT = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
 const msg = (err) => (err instanceof Error ? err.message : String(err));
 const revisionOf = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+
+/**
+ * 删除后能撤销的时限（毫秒）。
+ *
+ * 只在内存里留一次：面板显示倒计时、服务端拒绝过期 token，两边用这一个数。
+ * 进程重启就没了，这是刻意的——撤销是「手滑之后那一下」，不是回收站。
+ */
+const UNDO_TTL_MS = 10_000;
 
 /** 本地图的最大字节数（方案 §4：≤ 8 MiB）。 */
 export const MAX_COVER_BYTES = 8 * 1024 * 1024;
@@ -288,6 +296,15 @@ export class MapWorld {
   #writeBlocked = false;
   #lastSaved = null;
   #queue = Promise.resolve();
+  /**
+   * 刚刚删掉的那一处，等待撤销（`{ token, before, after, expiresAt, name }`）。
+   *
+   * `before` 是删除前的整份 state 快照：撤销时整份换回去，
+   * 连带把「别处指向它的关系」和「它是不是当前住所」一起还原——
+   * 只塞回一条地点会留下指向空气的关系，那比不撤销更糟。
+   * 只有 `revisionOf(#state) === after`（这期间没人动过）才允许换回。
+   */
+  #undo = null;
   #now;
   #persist = null;
   #rawCfg = null;
@@ -1077,6 +1094,8 @@ export class MapWorld {
         case 'add': return await this.#panelAdd(a);
         case 'edit': return await this.#panelEdit(a);
         case 'remove': return await this.#panelRemove(String(a.id ?? ''));
+        case 'undoRemove': return await this.#panelUndoRemove(String(a.token ?? ''));
+        case 'batchEdit': return await this.#panelBatchEdit(a);
         case 'frequent': return await this.#panelFrequent(String(a.id ?? ''), a.on === true);
         case 'terrain': return await this.#panelTerrain(a);
         case 'setHome': return await this.#setHome(String(a.id ?? ''));
@@ -1146,6 +1165,8 @@ export class MapWorld {
       summary: sum,
       homeId: st.homeId ?? '',
       stateRevision: revisionOf(st),
+      // 刚删掉的那一处还能不能撤回（10 秒内、且这期间没改过别处）。
+      undo: this.#undoInfo(),
       places: places.map((p) => ({
         revision: revisionOf(p),
         ...placeView(p, st),
@@ -1342,11 +1363,121 @@ export class MapWorld {
     return { ok: true, changed, place: { ...placeView(placeById(this.#state, place.id), this.#state), revision: revisionOf(place) } };
   }
 
+  /**
+   * 删掉一处，并留一张 10 秒的「撤销牌」。
+   *
+   * 返回的 `undo` 直接交给面板显示倒计时；`before` 快照只留在服务端内存里，
+   * 不写盘、不进任何回执——它是整份 state，没必要也**不该**给面板。
+   */
   async #panelRemove(id) {
+    const before = JSON.stringify(this.#state);
     const { removed, error } = removePlace(this.#state, id, this.#now());
     if (error) return { ok: false, error };
     await this.#save();
-    return { ok: true, removed: removed?.name ?? '' };
+    this.#undo = {
+      token: `undo-${randomUUID()}`,
+      before,
+      after: revisionOf(this.#state),
+      expiresAt: this.#now() + UNDO_TTL_MS,
+      name: removed?.name ?? '',
+    };
+    return { ok: true, removed: removed?.name ?? '', undo: this.#undoInfo() };
+  }
+
+  /** 当前那张撤销牌的对外样子；过期就当没有，顺手清掉。 */
+  #undoInfo() {
+    const u = this.#undo;
+    if (!u) return null;
+    const remainingMs = u.expiresAt - this.#now();
+    if (remainingMs <= 0) {
+      this.#undo = null;
+      return null;
+    }
+    return { token: u.token, name: u.name, expiresAt: u.expiresAt, remainingMs };
+  }
+
+  /**
+   * 撤销刚才那次删除。
+   *
+   * 三道门：token 对得上、没超过 10 秒、这期间 state 没被改过。
+   * 第三道是关键——撤销用的是**删除前的整份快照**，如果中间主人改了别的
+   * （哪怕只是给另一处加了个标签），换回去就等于把他的修改一起冲掉。
+   */
+  async #panelUndoRemove(token) {
+    const u = this.#undo;
+    if (!u) return { ok: false, error: '没有可以撤销的删除（可能已经过期）' };
+    if (!token || token !== u.token) return { ok: false, error: '这次撤销已经失效（后面又有新的改动或删除）' };
+    if (this.#now() > u.expiresAt) {
+      this.#undo = null;
+      return { ok: false, error: '超过 10 秒了，这次删除不能再撤销' };
+    }
+    if (revisionOf(this.#state) !== u.after) {
+      this.#undo = null;
+      return { ok: false, error: '地点在这之间被改过，撤销会把那些修改一起冲掉，已拒绝' };
+    }
+    try {
+      this.#state = normalizeState(JSON.parse(u.before));
+    } catch {
+      return { ok: false, error: '撤销用的快照读不出来，这次撤销作废' };
+    }
+    await this.#save();
+    this.#undo = null;
+    return { ok: true, restored: u.name };
+  }
+
+  /**
+   * 一次改多处：加/移标签、标记或取消「常去」、调整归类。
+   *
+   * 只做传进来的那几项，没传的不动。几处刻意的行为：
+   *   - 先整体校验再写：有任何 id 不存在、归类认不出、一条改动都没给，整次不动；
+   *   - **逐处**决定要不要跳过：加标签会超过 8 个的那一处跳过并单独报告，
+   *     其余照改——不因为一处满了就把整批回滚；
+   *   - 标签仍走 `normalizeTags`（纯文本、每条 ≤24 字、去重），不另开一套规则。
+   */
+  async #panelBatchEdit(a) {
+    const ids = Array.isArray(a?.ids) ? a.ids.filter((x) => typeof x === 'string' && x.trim()) : [];
+    if (!ids.length) return { ok: false, error: '先在卡片上勾选要处理的地点' };
+    if (new Set(ids).size !== ids.length) return { ok: false, error: '勾选名单里有重复的地点' };
+    const places = ids.map((id) => placeById(this.#state, id));
+    if (places.some((p) => !p)) return { ok: false, error: '有勾选的地点已经不存在了，刷新后再试' };
+
+    const addTags = normalizeTags(a?.addTags);
+    const removeTags = normalizeTags(a?.removeTags);
+    const touchedKind = a !== null && typeof a === 'object' && Object.hasOwn(a, 'kind');
+    const kind = touchedKind ? normalizeKind(a.kind) : '';
+    if (touchedKind && !kind) return { ok: false, error: '归类只认「家 / 常去的 / 周围 / 旅行」四档' };
+    const touchedFrequent = a !== null && typeof a === 'object' && Object.hasOwn(a, 'frequent');
+    const frequent = touchedFrequent ? a.frequent === true : undefined;
+    if (!addTags.length && !removeTags.length && !kind && !touchedFrequent) return { ok: false, error: '没有要改的内容' };
+
+    const updated = [];
+    const skipped = [];
+    for (const place of places) {
+      const patch = {};
+      if (addTags.length || removeTags.length) {
+        const base = Array.isArray(place.tags) ? place.tags : [];
+        const merged = [...base];
+        for (const tag of addTags) if (!merged.includes(tag)) merged.push(tag);
+        const wanted = merged.filter((tag) => !removeTags.includes(tag));
+        // 先按「合并后到底会有几条」判，再归一：归一本身会把超出的截掉，
+        // 拿截完的结果去比永远比不出来，那样就成了「悄悄丢标签」。
+        if (wanted.length > MAX_TAGS) {
+          skipped.push({ id: place.id, name: place.name, reason: `标签最多 ${MAX_TAGS} 个，这处已有 ${base.length} 个` });
+          continue;
+        }
+        patch.tags = normalizeTags(wanted);
+      }
+      if (kind) patch.kind = kind;
+      if (frequent !== undefined) patch.frequent = frequent;
+      const { changed, error } = editPlace(this.#state, place.id, patch, this.#now());
+      if (error) {
+        skipped.push({ id: place.id, name: place.name, reason: error });
+        continue;
+      }
+      if (changed.length) updated.push(place.id);
+    }
+    if (updated.length) await this.#save();
+    return { ok: true, updated: updated.length, skipped, total: ids.length };
   }
 
   async #panelFrequent(id, on) {

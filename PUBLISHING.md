@@ -1,6 +1,6 @@
 # 发布清单（cortico-world-map）
 
-> 这一版 **0.2.1**，本地准备中，尚未发布。发布由主人自己在 PowerShell 里敲（`npm publish` 要真 TTY + 6 位 OTP，agent 做不了）。
+> 这一版 **0.2.2**，本地准备中，尚未发布。发布由主人自己在 PowerShell 里敲（`npm publish` 要真 TTY + 6 位 OTP，agent 做不了）。
 
 ## 发之前
 
@@ -44,8 +44,8 @@ npm publish --otp 123456    # 换成你手机上的码
 ## 发之后验
 
 ```powershell
-npm view cortico-world-map version        # 应回 0.2.1
-npm view cortico-world-map dist-tags      # 发布成功后 latest 应是 0.2.1
+npm view cortico-world-map version        # 应回 0.2.2
+npm view cortico-world-map dist-tags      # 发布成功后 latest 应是 0.2.2
 ```
 
 想让它进市场，开一个 `[同步] cortico-world-map` issue。
@@ -62,9 +62,9 @@ npm view cortico-world-map dist-tags      # 发布成功后 latest 应是 0.2.1
 
 ## 版本号
 
-**当前 `0.2.1`**：基于已发布的 0.2.0，增加“合并更新（仅已有地点）”导入模式；同 id 同名地点只补空白，已有文字、标签、关系、图片和常去状态保留，不新增地点、不切换住所；冲突提示保留本地，确认绑定预览的文件、模式和状态。预览支持逐项勾选与逐项处理方式（跳过 / 合并 / 覆盖），确认提交的是预览时那份 `decisions`；成功导入后保留最近一次导入前的快照，可先预览影响再确认恢复，导入后被改过则拒绝恢复。数据格式兼容 version 1，无需迁移；草稿位于 `map/drafts.json`，地点保存继续备份到 `state.json.bak`，导入恢复点位于 `map/import-recovery.json`（只是回退用的快照，不参与正常读取）。
+**当前 `0.2.2`**：基于 0.2.1，增加三件面板增强——批量管理（勾选多处后一次加/移标签、标记常去、改归类；先整体校验，标签满 8 个的那处单独跳过并说明）、常用筛选快捷项（全部 / 常去 / 有图 / 缺描写，与筛选下拉共用状态）、删除后 10 秒撤销（一次性 token，超过 10 秒或期间改过别处即拒绝，连图片、住所与指向它的关联一起恢复）。0.2.1 的内容不变：本地优先合并更新、逐项预览与导入前恢复点。数据格式兼容 version 1，无需迁移；撤销只在内存里保留 10 秒。
 
-测试共 **220 项**（places 24 · state 47 · world 79 · transfer 14 · panels 56）。
+测试共 **230 项**（places 24 · state 47 · world 86 · transfer 14 · panels 59）。
 
 改版本号要同时改：
 

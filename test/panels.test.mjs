@@ -1648,4 +1648,76 @@ test('恢复预览后的后续编辑被服务端拒绝，失败保留本地表�
   assert.equal(button(root, '确认恢复导入前状态'), undefined);
 });
 
+// ---------------------------------------------------------------------------
+// 面板三项增强：常用筛选 / 批量管理 / 删除撤销
+// ---------------------------------------------------------------------------
+
+test('常用筛选：一点就切，条件不用每次重新组', async () => {
+  const { mount, tool } = await mountPanels({ withCover: true });
+  await tool('map_edit')({ place: '溪边', frequent: true });
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+
+  const qf = (label) => root.querySelectorAll('.map-qf').find((b) => b.textContent === label);
+  for (const label of ['全部', '常去', '有图', '缺描写']) assert.ok(qf(label), `该有「${label}」快捷筛选`);
+  assert.equal(qf('全部').getAttribute('aria-pressed'), 'true', '默认停在「全部」');
+
+  qf('有图').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 1, '只剩有图那一张');
+  assert.equal(qf('有图').getAttribute('aria-pressed'), 'true', '点过的那颗要高亮');
+
+  qf('缺描写').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 3, '缺描写的三张');
+
+  qf('常去').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 1, '常去那一张');
+
+  qf('全部').fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '回到全部五张');
+});
+
+test('批量管理：多选两处，一次加同一个标签', async () => {
+  const { mount, decl } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+
+  button(root, '批量管理').fire('click');
+  await waitFor(() => root.querySelector('.map-batch'), '出现批量工具条');
+  const cards = root.querySelectorAll('.map-card');
+  cards[0].fire('click');
+  cards[1].fire('click');
+  await waitFor(() => root.querySelectorAll('.map-card-selected').length === 2, '选中两处');
+
+  root.querySelector('.map-batch').querySelectorAll('input')[0].value = '水边';
+  button(root, '加标签').fire('click');
+  await waitFor(() => !root.querySelector('.map-batch'), '改完退出批量模式');
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '回到五张卡');
+
+  const list = (await decl.invoke('places', 'list', [])).places;
+  assert.equal(list.filter((p) => p.tags.includes('水边')).length, 2, '勾选的那两处该都有这个标签');
+});
+
+test('删掉之后出现撤销条，点一下地点就回来', async () => {
+  const { mount, decl } = await mountPanels();
+  const root = await mount();
+  await waitFor(() => root.querySelectorAll('.map-card').length === 5, '画出 5 张卡');
+  globalThis.window = { confirm: () => true };
+  try {
+    root.querySelectorAll('.map-card').find((c) => c.querySelector('.map-card-name').textContent === '蘑菇坡').fire('click');
+    await waitFor(() => root.querySelector('.map-detail'), '展开详情');
+    root.querySelector('.map-detail').findAll((n) => n.tagName === 'BUTTON' && n.textContent === '删掉这处')[0].fire('click');
+    await waitFor(() => root.querySelectorAll('.map-card').length === 4, '删掉之后剩 4 张');
+    await waitFor(() => root.textContent.includes('10 秒内可撤销'), '出现撤销条');
+    assert.ok(root.textContent.includes('蘑菇坡'), '撤销条要说清删的是哪一处');
+
+    button(root, '撤销').fire('click');
+    await waitFor(() => root.querySelectorAll('.map-card').length === 5, '撤销之后回到 5 张');
+    const list = (await decl.invoke('places', 'list', [])).places;
+    assert.ok(list.some((p) => p.name === '蘑菇坡'), '撤销后服务端也该有这一处');
+    assert.ok(!root.textContent.includes('10 秒内可撤销'), '撤销完提示要收掉');
+  } finally {
+    delete globalThis.window;
+  }
+});
+
 await report();
