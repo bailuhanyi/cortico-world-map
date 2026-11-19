@@ -4,7 +4,7 @@
  * **这个文件就是「小地图」的全部内容模型**，照 `MAP-小地图插件-方案.md` §3 定稿。
  * 每个地点只有文字 + 图片引用：
  *
- *   id / name / aliases / kind / desc / style / cover / scene / funVenue / frequent / terrain
+ *   id / name / aliases / kind / desc / style / cover / scene / funVenue / frequent / terrain / relations / tags / modifiedAt?
  *
  * **没有坐标、没有路线、没有距离、没有导航**——这是需求红线，不是「这一版先不做」。
  * `test/places.test.mjs` 里钉了一条守门断言：任何 place 都不许出现 geo 字段。
@@ -222,6 +222,19 @@ export function isSafeId(id) {
  * （比方案 §3 的十个多了 `funVenue`：2026-11-15 加旅游预设时新增，
  *   用来指娱乐时间里最接近这处的那一个场所。仍然没有任何 geo 含义。）
  */
+/** Cover focal point in image percentages; absent means centered. Never a geographic position. */
+export function normalizeCoverFocus(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const { x, y } = value;
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || x > 100 || y < 0 || y > 100) return undefined;
+  return { x, y };
+}
+
+/** Place edit time in milliseconds. Missing and invalid times are unknown (0). */
+export function normalizeModifiedAt(value) {
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
 export function normalizePlace(raw, fallbackTerrain = '') {
   if (!raw || typeof raw !== 'object') return null;
   const id = text(raw.id, 40);
@@ -231,6 +244,8 @@ export function normalizePlace(raw, fallbackTerrain = '') {
   // 主人写「常去的」和写 `frequent` 等价；认不出的落 around（不丢这处地方）。
   const kind = normalizeKind(raw.kind) || 'around';
   const terrain = isTerrain(raw.terrain) ? raw.terrain : (isTerrain(fallbackTerrain) ? fallbackTerrain : '');
+  const cover = coverName(raw.cover);
+  const coverFocus = cover ? normalizeCoverFocus(raw.coverFocus) : undefined;
   return {
     id,
     name,
@@ -239,12 +254,14 @@ export function normalizePlace(raw, fallbackTerrain = '') {
     kind,
     desc: text(raw.desc, 400),
     style: text(raw.style, 160),
-    cover: coverName(raw.cover),
+    cover,
+    ...(coverFocus ? { coverFocus } : {}),
     scene: text(raw.scene, 40),
     funVenue: text(raw.funVenue, 40),
     frequent: raw.frequent === true,
     terrain,
     relations: normalizeRelations(raw.relations, id),
+    modifiedAt: normalizeModifiedAt(raw.modifiedAt),
   };
 }
 

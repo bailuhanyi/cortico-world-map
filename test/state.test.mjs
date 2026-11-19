@@ -13,7 +13,7 @@ import { test, report } from './harness.mjs';
 import {
   MAX_ALIASES, MAX_PLACES, addPlace, applyTerrain, applyTerrainSelection, editPlace, kindLabelOf, placeCompleteness,
   listPlaces, newState, normalizeKind, normalizeState, placeById, placeView, removePlace,
-  resolvePlace, resolvePlaceCandidates, setCover, summaryOf,
+  resolvePlace, resolvePlaceCandidates, setCover, setCoverFocus, summaryOf,
 } from '../src/state.js';
 import { terrainPlaces } from '../src/places.js';
 
@@ -510,6 +510,77 @@ test('applyTerrainSelection：第5参启用示例描写，仅影响新增，已�
   assert.equal(placeById(st, 'forest-home').desc, '');
   assert.equal(placeById(st, 'forest-creek').desc, '自己的溪边');
   assert.equal(placeById(st, 'forest-creek').style, '水彩');
+});
+
+test('coverFocus changes only image anchor, copies views, and resets on replacement/clear', () => {
+  const st = forestState();
+  const id = 'forest-creek';
+  assert.ok(setCoverFocus(st, id, { x: 2, y: 3 }, 2).error);
+  setCover(st, id, 'creek.png', 3);
+  assert.equal(setCoverFocus(st, id, { x: 20, y: 80 }, 4).changed, true);
+  assert.equal(st.updatedAt, 4);
+  const p = placeById(st, id);
+  assert.deepEqual(normalizeState(st).places.find((it) => it.id === id).coverFocus, { x: 20, y: 80 });
+  const view = placeView(p, st);
+  view.coverFocus.x = 99;
+  assert.equal(p.coverFocus.x, 20);
+  assert.equal(setCoverFocus(st, id, { x: 20, y: 80 }, 5).changed, false);
+  assert.equal(st.updatedAt, 4);
+  const before = structuredClone(st);
+  assert.ok(setCoverFocus(st, id, { x: '20', y: 80 }, 6).error);
+  assert.deepEqual(st, before);
+  editPlace(st, id, { coverFocus: { x: 1, y: 2 } });
+  assert.deepEqual(p.coverFocus, { x: 20, y: 80 });
+  assert.ok(setCover(st, id, 'not a file', 7).error);
+  assert.deepEqual(p.coverFocus, { x: 20, y: 80 });
+  setCover(st, id, 'creek.png', 8);
+  assert.equal(Object.hasOwn(p, 'coverFocus'), false);
+  setCoverFocus(st, id, { x: 10, y: 30 }, 9);
+  setCover(st, id, 'other.png', 10);
+  assert.equal(Object.hasOwn(p, 'coverFocus'), false);
+  setCoverFocus(st, id, { x: 10, y: 30 }, 11);
+  assert.equal(setCoverFocus(st, id, { x: 50, y: 50 }, 12).changed, true);
+  assert.equal(Object.hasOwn(p, 'coverFocus'), false);
+  setCoverFocus(st, id, { x: 10, y: 30 }, 13);
+  setCover(st, id, '', 14);
+  assert.equal(Object.hasOwn(p, 'coverFocus'), false);
+  assert.equal(Object.hasOwn(placeView(p, st), 'coverFocus'), false);
+});
+
+test('place timestamps touch actual writes, ignore no-ops, and do not change v1 format', () => {
+  const state = newState();
+  assert.equal(applyTerrain(state, 'forest', 1000).error, '');
+  assert.ok(state.places.every((place) => place.modifiedAt === 1000));
+  const creek = placeById(state, 'forest-creek');
+  assert.equal(editPlace(state, creek.id, { desc: '溪水' }, 2000).place.modifiedAt, 2000);
+  assert.deepEqual(editPlace(state, creek.id, { desc: '溪水' }, 3000).changed, []);
+  assert.equal(creek.modifiedAt, 2000, '重复编辑不能刷新 per-place timestamp');
+  assert.equal(setCover(state, creek.id, 'creek.png', 4000).place.modifiedAt, 4000);
+  setCover(state, creek.id, 'creek.png', 4500);
+  assert.equal(creek.modifiedAt, 4000, '重复设置同一封面不是实际修改');
+  assert.equal(setCoverFocus(state, creek.id, { x: 20, y: 30 }, 5000).changed, true);
+  assert.equal(creek.modifiedAt, 5000);
+  assert.equal(setCoverFocus(state, creek.id, { x: 20, y: 30 }, 6000).changed, false);
+  assert.equal(creek.modifiedAt, 5000, '重复焦点不能刷新');
+  const added = addPlace(state, { name: '新地点' }, 7000).place;
+  assert.equal(added.modifiedAt, 7000);
+  editPlace(state, 'forest-home', { relations: [{ placeId: creek.id, note: '窗边能看见' }] }, 8000);
+  const removed = removePlace(state, creek.id, 9000).removed;
+  assert.equal(removed.modifiedAt, 5000, '移除不会重写被删记录');
+  assert.equal(state.places.some((place) => place.id === creek.id), false, '移除地点后不保留记录');
+  assert.equal(placeById(state, 'forest-home').modifiedAt, 9000, '清理关联也是地点修改');
+  assert.equal(placeView(added, state).modifiedAt, 7000);
+  assert.equal(state.version, 1, '没有升级状态格式版本');
+});
+
+test('legacy places default to zero and invalid timestamps are scrubbed', () => {
+  const normalized = normalizeState({ version: 1, places: [
+    { id: 'old', name: '旧地点' },
+    { id: 'negative', name: '负数', modifiedAt: -1 },
+    { id: 'text', name: '文字', modifiedAt: '42' },
+    { id: 'valid', name: '有效', modifiedAt: 12.5 },
+  ] });
+  assert.deepEqual(normalized.places.map((place) => place.modifiedAt), [0, 0, 0, 12.5]);
 });
 
 await report();

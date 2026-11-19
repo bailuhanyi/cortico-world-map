@@ -72,10 +72,10 @@ const CSS = `
 .map-chip-scene{color:var(--m-ink);border-color:var(--m-accent);background:color-mix(in srgb,var(--m-accent) 10%,transparent);font-size:11px}
 
 /* 详情 */
-.map-detail{border:1px solid var(--m-accent);border-top:none;border-radius:0 0 var(--radius-sm,6px) var(--radius-sm,6px);padding:10px 13px 12px;background:var(--m-card)}
+.map-detail,.map-reading{border:1px solid var(--m-accent);border-top:none;border-radius:0 0 var(--radius-sm,6px) var(--radius-sm,6px);padding:10px 13px 12px;background:var(--m-card)}
 .map-detail-top{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:6px}
 .map-detail h4{margin:0;font-size:14px}
-.map-detail p{margin:0 0 6px;font-size:12.5px}
+.map-detail p,.map-reading p{margin:0 0 6px;font-size:12.5px}
 .map-field{margin-bottom:8px}
 .map-field label{display:block;font-size:11.5px;color:var(--m-dim);margin-bottom:3px}
 .map-field-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -133,6 +133,132 @@ const CSS = `
 .map-batch{align-items:center}
 .map-card-select{cursor:pointer}
 .map-card-selected{border-color:var(--m-accent)!important;background:color-mix(in srgb,var(--m-accent) 7%,var(--m-card))!important}
+/* 地点册 */
+.map-toolbar,.map-filter-row,.map-view{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.map-toolbar{margin-bottom:10px}
+.map-toolbar input[type=search]{flex:1 1 210px;min-height:34px}
+.map-filter-row{margin-bottom:12px}
+.map-filter-row .map-quick-filters{margin:0}
+.map-view{gap:3px;background:var(--m-soft);padding:3px;border-radius:8px}
+.map-view button{border-color:transparent}
+.map-view button[aria-pressed=true]{border-color:var(--m-line);font-weight:600}
+.map-manage{border:1px solid var(--m-line);border-radius:10px;background:var(--m-soft);padding:12px;margin:0 0 14px}
+.map-results{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:8px 0;color:var(--m-dim);font-size:12px}
+.map-results-count{margin-inline-end:auto}
+.map-home-banner{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);align-items:center;border:1px solid var(--m-line);border-radius:14px;background:color-mix(in srgb,var(--m-accent) 8%,var(--m-card));overflow:hidden;margin:4px 0 16px}
+.map-home-text{grid-template-columns:1fr}
+.map-home-art{min-width:0;align-self:stretch}
+.map-home-art .map-thumb{height:100%;min-height:145px;max-height:215px;aspect-ratio:16/10;border:0;border-radius:0}
+.map-home-copy{padding:16px;min-width:0}
+.map-home-copy h3,.map-reading h3{margin:0 0 6px;font-size:clamp(17px,4vw,23px);line-height:1.3;overflow-wrap:anywhere}
+.map-home-copy .map-card-desc{margin:6px 0 10px;-webkit-line-clamp:2}
+.map-home-label{color:var(--m-dim);margin-bottom:4px;font-size:12px}
+.map-grid{gap:12px}
+.map-card{border-radius:10px}
+.map-card-active{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.map-thumb{height:auto;aspect-ratio:16/9}
+.map-card-text{background:color-mix(in srgb,var(--m-accent) 5%,var(--m-card))}
+.map-card-body{padding:10px 12px 12px}
+.map-card-desc{-webkit-line-clamp:2;overflow-wrap:anywhere}
+.map-card .map-chip{overflow-wrap:anywhere}
+.map-reading{padding:14px 16px 16px}
+.map-reading-cover{display:block;width:100%;max-height:320px;object-fit:contain;background:var(--m-soft);border-radius:8px;margin:8px 0 12px}
+.map-reading-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.map-reading-actions{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.map-standalone{border:1px solid var(--m-line);border-radius:10px;margin-bottom:14px;overflow:hidden}
+.map-standalone>.map-detail,.map-standalone>.map-reading{border:0}
+.map-edit-options{margin:12px 0;padding:8px 10px;border:1px solid var(--m-line);border-radius:8px}
+.map-edit-options summary,.map-reading summary{cursor:pointer;color:var(--m-dim)}
+.map-edit-options[open]>summary{margin-bottom:9px}
+.map-results .map-chip{max-width:100%;overflow-wrap:anywhere}
+.map-relation-row{padding:7px 0;border-bottom:1px solid var(--m-line);overflow-wrap:anywhere}
+.map-relation-row:last-child{border-bottom:0}
+.map-relation-link{margin-inline:4px}
+.map{container:little-world / inline-size}
+.map-filter-extra{display:flex;flex-wrap:wrap;gap:8px}
+.map-filter-extra[hidden]{display:none}
+.map-card-body{display:grid;align-content:start;gap:5px}
+.map-card-body .map-chips,.map-card-body .map-card-desc{margin-top:0}
+.map-card-text .map-card-body{padding-block:16px}
+.map-original-trigger{display:block;width:100%;padding:0!important;border:0!important;background:transparent!important}
+.map-original-trigger .map-reading-cover{margin-inline:auto}
+.map-original{max-width:min(96vw,1100px);max-height:95vh;overflow:auto;margin:0 auto 12px;padding:10px;border:1px solid var(--m-line);border-radius:10px;background:var(--m-card);color:var(--m-ink)}
+.map-original[open]{margin:auto}
+.map-original::backdrop{background:rgb(0 0 0 / .58)}
+.map-original img{display:block;max-width:100%;max-height:78vh;object-fit:contain;width:auto;height:auto;margin:8px auto 0;border-radius:6px}
+.map-focus-settings{flex-basis:100%;margin-top:6px}
+.map-focus-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,160px),1fr));gap:10px;margin:8px 0}
+.map-focus-grid figure{min-width:0;margin:0}
+.map-focus-grid figcaption{font-size:12px;color:var(--m-dim);margin-bottom:4px}
+.map-focus-preview{position:relative;display:block;width:100%;overflow:hidden;border-radius:8px;background:var(--m-soft);touch-action:none;cursor:crosshair}
+.map-focus-preview img{display:block;width:100%;object-fit:cover;pointer-events:none}
+.map-focus-original{width:fit-content;max-width:100%;margin-inline:auto}
+.map-focus-original img{width:auto;max-width:100%;max-height:210px;object-fit:contain}
+.map-focus-preview span{position:absolute;width:16px;height:16px;transform:translate(-50%,-50%);border:2px solid white;box-shadow:0 0 0 1px rgb(0 0 0 / .6);border-radius:50%;pointer-events:none}
+.map-focus-controls{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
+.map-focus-controls label{display:flex;align-items:center;gap:5px}
+.map-edit-conflicts{display:grid;gap:8px}
+.map-edit-conflict{padding:8px 10px;border:1px solid color-mix(in srgb,#d9534f 45%,var(--m-line));border-radius:8px;background:color-mix(in srgb,#d9534f 5%,transparent)}
+.map-edit-conflict strong{display:block;margin-bottom:3px;color:var(--m-ink)}
+.map-edit-conflict button{margin:4px 6px 0 0}
+.map-edit-conflict .map-field{margin-bottom:3px;font-size:12px}
+/* 第二轮地点册视觉：状态统一、类型弱着色、管理/浏览分区 */
+.map-kind-home{--m-kind:var(--accent,#00a870)}
+.map-kind-frequent{--m-kind:#d99232}
+.map-kind-around{--m-kind:#7f8c98}
+.map-kind-travel{--m-kind:#7a6ac8}
+.map-card{border-top:2px solid color-mix(in srgb,var(--m-kind,var(--m-line)) 72%,transparent)}
+.map-card-home{border-left:3px solid var(--m-kind)!important}
+.map-card-freq{border-left:3px solid var(--m-kind)!important}
+.map-card .map-statuses{display:flex;gap:5px;flex-wrap:wrap;margin-top:2px}
+.map-status{font-size:11px;line-height:1.35;padding:2px 7px;border-radius:999px;border:1px solid color-mix(in srgb,var(--m-kind,var(--m-line)) 45%,var(--m-line));background:color-mix(in srgb,var(--m-kind,var(--m-card)) 10%,var(--m-card));color:var(--m-dim);white-space:nowrap}
+.map-status-kind{color:var(--m-ink);font-weight:600}
+.map-status-warn{--m-kind:#d99232}
+.map-status-link{--m-kind:var(--m-accent)}
+.map-cover-empty{display:flex;align-items:center;justify-content:center;min-height:104px;aspect-ratio:16/9;background:linear-gradient(135deg,color-mix(in srgb,var(--m-kind,#88939b) 10%,var(--m-card)),color-mix(in srgb,var(--m-kind,#88939b) 3%,var(--m-soft)));color:var(--m-dim);font-size:12px;letter-spacing:.02em}
+.map-cover-empty::before{content:'✦';font-size:18px;margin-inline-end:7px;opacity:.58}
+.map-home-art .map-cover-empty{height:100%;min-height:145px;aspect-ratio:auto}
+.map-filter-extra,.map-sort-row,.map-saved-views,.map-resource-list{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.map-sort-row{flex-basis:100%;margin-top:3px}
+.map-sort-row label{font-size:12px;color:var(--m-dim)}
+.map-saved-views{padding:7px 0 2px;flex-basis:100%}
+.map-saved-view{border-radius:999px!important;font-size:11.5px!important;padding:3px 9px!important}
+.map-saved-view-active{border-color:var(--m-accent)!important;background:color-mix(in srgb,var(--m-accent) 12%,var(--m-card))!important;font-weight:600}
+.map-breadcrumbs{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin:0 0 10px;padding:5px 2px;color:var(--m-dim);font-size:12px}
+.map-breadcrumbs button{border:0;background:transparent;padding:2px 4px;color:var(--m-accent);cursor:pointer}
+.map-breadcrumbs span{color:var(--m-dim)}
+.map-resource{padding:8px 10px;border:1px solid var(--m-line);border-radius:8px;background:var(--m-card);min-width:min(100%,260px);flex:1 1 260px}
+.map-resource-name{font-weight:600;overflow-wrap:anywhere}
+.map-resource-meta{color:var(--m-dim);font-size:11.5px}
+.map-resource-unref{--m-kind:#d99232}
+.map-resource-missing{--m-kind:#d9534f}
+.map-zone-browse{position:relative}
+.map-zone-edit{background:color-mix(in srgb,var(--m-accent) 3%,transparent);border-radius:10px;padding:3px}
+.map-zone-manage{background:color-mix(in srgb,var(--foreground,#1b1a1e) 3%,transparent);border:1px solid var(--m-line);border-radius:10px;padding:10px;margin-bottom:12px}
+.map-focus-frame{position:absolute;inset:0;border:2px dashed var(--m-accent);outline:1px solid var(--m-card);pointer-events:none;border-radius:2px;visibility:hidden}
+.map-focus-frame-1{border-style:dotted;border-color:var(--m-warm)}
+.map-home-art{align-self:center;aspect-ratio:16/10}
+.map-home-art .map-thumb{height:auto;min-height:0;max-height:none;aspect-ratio:16/10}
+.map-resource-name input{margin-inline-end:6px}
+.map-card .map-card-body{background:color-mix(in srgb,var(--m-kind,var(--m-card)) 4%,var(--m-card))}
+.map-statuses{display:flex;gap:5px;flex-wrap:wrap}
+.map-status{white-space:normal;overflow-wrap:anywhere}
+.map-card .map-card-desc{min-height:3.2em}
+.map-recent-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.map-recent-row .map-saved-views{flex-basis:auto;max-width:100%}
+.map-resource-missing{border-color:color-mix(in srgb,var(--m-kind) 50%,var(--m-line))}
+.map-focus-preview{isolation:isolate}
+.map-focus-preview .map-focus-frame{z-index:2}
+@media(max-width:420px){.map-sort-row select{flex:1 1 150px}.map-resource{flex-basis:100%}.map-focus-grid{grid-template-columns:1fr}}
+@container little-world (max-width:460px){
+  .map-home-banner{grid-template-columns:1fr}
+  .map-home-art .map-thumb{height:auto;min-height:0}
+  .map-home-copy,.map-reading{padding:12px}
+  .map-toolbar input[type=search]{flex-basis:100%}
+  .map-filter-row .map-quick-filters,.map-filter-extra{flex-basis:100%}
+  .map-grid{grid-template-columns:1fr}
+}
+@media(max-width:420px){.map-home-banner{grid-template-columns:1fr}.map-home-art .map-thumb{height:auto;min-height:0}.map-toolbar input[type=search]{flex-basis:100%}}
 `;
 
 /** 面板自己的文案（服务端 config.js 的 panelText 另存一份，改文案时两处一起改）。 */
@@ -171,7 +297,22 @@ const T = {
     detailStyle: '画风',
     detailAliases: '别名（逗号分开）',
     detailTags: '标签（逗号分开）',
-    tagQuery: '查询标签',
+    search: '搜索名称、别名、标签、地形', manage: '管理', addPreset: '添加预设',
+    edit: '编辑', read: '返回阅读', close: '收起', backPlace: '返回上一处',
+    currentHome: '当前住所', viewHome: '查看住所', reset: '清除筛选', noResults: '没有符合条件的地点',
+    filterLabel: '筛选地点', relationLabel: '地点关联',
+    sortLabel: '排序', sortKind: '默认分组', sortUpdated: '最近编辑', sortViewed: '最近查看',
+    sortName: '名称', sortFrequent: '常去优先', sortCover: '有图优先', sortCompleteness: '完整度',
+    recentViewed: '最近查看', recentEdited: '最近编辑', savedViews: '我的视图', saveView: '保存当前视图',
+    viewName: '视图名称', applyView: '应用', removeView: '删除视图', deleteViewConfirm: '删除这个已保存视图？', viewSaved: '视图已保存',
+    inspectCovers: '检查图片', coverInventory: '图片资源检查', coverNoRefs: '没有发现引用', coverUsed: '已引用', coverMissing: '文件缺失',
+    cleanCandidates: '无引用图片（需手动核查）', coverCleanupBlocked: '不会自动删除图片；请先保留数据目录副本并自行核查备份与恢复点。',
+    relationTrail: '浏览路径', currentPlace: '当前地点', resetCoverFocus: '恢复居中', presetFocus: '焦点预设',
+    focusTop: '主体靠上', focusCenter: '居中', focusBottom: '主体靠下', focusRule: '裁切范围',
+    noCoverLabel: '还没有封面', recentlyViewedLabel: '最近看过', recentlyEditedLabel: '最近编辑过',
+    coverOldWarning: '旧图片可能仍被备份、恢复点或撤销引用，请不要只凭“无引用”结果删除。',
+    options: '联动设置',
+    resultCount: (total, count) => `共 ${total} 处 · 当前显示 ${count} 处`,
     tagFilter: '筛选标签',
     allTags: '全部标签',
     cardsView: '卡片视图',
@@ -258,7 +399,21 @@ const T = {
     detailStyle: 'Style',
     detailAliases: 'Aliases (comma separated)',
      detailTags: 'Tags (comma separated)',
-     tagQuery: 'Search tags',
+     search: 'Search names, aliases, tags and terrain', manage: 'Manage', addPreset: 'Add presets',
+     edit: 'Edit', read: 'Back to reading', close: 'Close', backPlace: 'Back to previous place',
+     currentHome: 'Current home', viewHome: 'View home', reset: 'Clear filters', noResults: 'No matching places',
+     filterLabel: 'Filter places', relationLabel: 'Place relations', options: 'Link settings',
+     sortLabel: 'Sort', sortKind: 'Default groups', sortUpdated: 'Recently edited', sortViewed: 'Recently viewed',
+     sortName: 'Name', sortFrequent: 'Frequent first', sortCover: 'With photo first', sortCompleteness: 'Completeness',
+     recentViewed: 'Recently viewed', recentEdited: 'Recently edited', savedViews: 'Saved views', saveView: 'Save current view',
+     viewName: 'View name', applyView: 'Apply', removeView: 'Delete view', deleteViewConfirm: 'Delete this saved view?', viewSaved: 'View saved',
+     inspectCovers: 'Inspect photos', coverInventory: 'Photo inventory', coverNoRefs: 'No references found', coverUsed: 'Referenced', coverMissing: 'File missing',
+     cleanCandidates: 'No-reference candidates (review required)', coverCleanupBlocked: 'Photos are never deleted automatically. Keep a copy of the data folder and review backups and recovery snapshots yourself.',
+     relationTrail: 'Browsing path', currentPlace: 'Current place', resetCoverFocus: 'Center focus', presetFocus: 'Focus presets',
+     focusTop: 'Subject near top', focusCenter: 'Center', focusBottom: 'Subject near bottom', focusRule: 'Crop area',
+     noCoverLabel: 'No cover yet', recentlyViewedLabel: 'Recently viewed', recentlyEditedLabel: 'Recently edited',
+     coverOldWarning: 'Older photos may still be referenced by backups, recovery snapshots or undo; do not delete based only on the no-reference result.',
+     resultCount: (total, count) => `${count} of ${total} places`,
      tagFilter: 'Filter tags',
      allTags: 'All tags',
      cardsView: 'Cards',
@@ -395,10 +550,25 @@ function mountPlaces(ctx) {
     expanded: null,
     query: '',
     filter: 'all',
-    tagQuery: '',
+    editing: false,
+    detached: false,
+    trail: [],
+    managing: false,
     tagFilter: '',
+    filtersOpen: false,
     view: 'cards',
-    draftsLoaded: false,
+    sort: 'kind',
+    savedViews: [],
+    pinned: [],
+    recentViewed: [],
+    recentEdited: [],
+    prefsLoaded: false,
+    prefsTimer: null,
+    savingView: false,
+    coverInventory: null,
+    coverSelected: new Set(),
+    coverArchives: [],
+    resourcesBusy: false,
     restoredDrafts: null,
     draftTimer: null,
     adding: false,
@@ -417,7 +587,9 @@ function mountPlaces(ctx) {
     loadVersion: 0,
     pending: new Set(),
     conflicts: new Map(),
+    openOptions: new Set(),
     baseRevisions: new Map(),
+    baseValues: new Map(),
     // 批量管理：进入后卡片点击 = 勾选，不再是展开。
     batchMode: false,
     selectedIds: new Set(),
@@ -428,13 +600,54 @@ function mountPlaces(ctx) {
 
   root.replaceChildren();
   const box = shell(root, t.title);
-  const head = el('div');
-  const body = el('div');
+  const head = el('div', { class: 'map-zone-manage-head' });
+  const body = el('div', { class: 'map-zone-browse' });
   box.appendChild(head);
   box.appendChild(body);
 
   const setMessage = (text, ok = true) => {
     state.message = text ? { text, ok } : null;
+  };
+
+  const prefsSnapshot = () => ({
+    version: 1,
+    savedViews: state.savedViews.map((view) => ({ ...view })),
+    pinned: [...state.pinned],
+    recentViewed: [...state.recentViewed],
+    recentEdited: [...state.recentEdited],
+  });
+  const applyPrefs = (prefs) => {
+    if (!prefs || prefs.version !== 1) return;
+    state.savedViews = Array.isArray(prefs.savedViews) ? prefs.savedViews.map((view) => ({ ...view })) : [];
+    state.pinned = Array.isArray(prefs.pinned) ? [...prefs.pinned] : [];
+    state.recentViewed = Array.isArray(prefs.recentViewed) ? [...new Set(prefs.recentViewed)] : [];
+    state.recentEdited = Array.isArray(prefs.recentEdited) ? [...new Set(prefs.recentEdited)] : [];
+  };
+  const persistPrefs = () => {
+    if (!state.prefsLoaded) return;
+    if (state.prefsTimer) clearTimeout(state.prefsTimer);
+    state.prefsTimer = setTimeout(() => {
+      const prefs = prefsSnapshot();
+      Promise.resolve(ctx.invoke('savePanelPrefs', [{ prefs }])).then((result) => {
+        if (result?.ok === false) throw new Error(result.error ?? '偏好保存失败');
+      }).catch((err) => {
+        setMessage(`${language === 'en' ? 'Preferences were not saved' : '面板偏好未保存'}：${err?.message ?? err}`, false);
+        if (state.data && !ctx.signal?.aborted) renderHead();
+      });
+    }, 250);
+  };
+  const touchRecent = (key, id) => {
+    if (!id || !state.data?.places?.some((place) => place.id === id)) return;
+    state[key] = [id, ...state[key].filter((item) => item !== id)].slice(0, 12);
+    refreshRecentStrips();
+    persistPrefs();
+  };
+  const loadPrefs = async () => {
+    try {
+      const result = await ctx.invoke('getPanelPrefs', []);
+      if (result?.ok !== false) applyPrefs(result?.prefs);
+    } catch { /* older host: browser session still works */ }
+    state.prefsLoaded = true;
   };
 
   const call = async (method, args) => {
@@ -453,6 +666,10 @@ function mountPlaces(ctx) {
         error.current = r.current;
         throw error;
       }
+      if (mutating && ['edit', 'upload', 'clearCover', 'coverFocus', 'frequent', 'batchEdit', 'setHome', 'add', 'terrain'].includes(method)) {
+        const editedId = args?.[0]?.id ?? r?.place?.id;
+        if (editedId) touchRecent('recentEdited', String(editedId));
+      }
       return r;
     } finally {
       if (mutating) {
@@ -468,13 +685,24 @@ function mountPlaces(ctx) {
     if (!state.draftsLoaded) return;
     if (state.draftTimer) clearTimeout(state.draftTimer);
     state.draftTimer = setTimeout(() => {
-      const drafts = [...state.drafts].map(([id, fields]) => ({ id, fields }));
+      const drafts = [...state.drafts].map(([id, fields]) => ({ id, fields,
+        ...(state.baseValues.has(id) ? { base: { revision: state.baseRevisions.get(id), fields: state.baseValues.get(id) } } : {}),
+      }));
       Promise.resolve(ctx.invoke('saveDrafts', [{ drafts }])).catch(() => {});
     }, 350);
   };
   function applyDrafts(drafts) {
     state.drafts.clear();
-    for (const item of drafts ?? []) if (item && typeof item.id === 'string' && item.fields && typeof item.fields === 'object') state.drafts.set(item.id, { ...item.fields });
+    state.baseValues.clear();
+    state.baseRevisions.clear();
+    for (const item of drafts ?? []) {
+      if (!item || typeof item.id !== 'string' || !item.fields || typeof item.fields !== 'object') continue;
+      state.drafts.set(item.id, { ...item.fields });
+      if (item.base?.fields && typeof item.base.fields === 'object' && typeof item.base.revision === 'string') {
+        state.baseValues.set(item.id, { ...item.base.fields });
+        state.baseRevisions.set(item.id, item.base.revision);
+      }
+    }
     state.draftsLoaded = true;
     state.restoredDrafts = [...state.drafts.keys()];
   }
@@ -483,10 +711,14 @@ function mountPlaces(ctx) {
     if (!form) return;
     const draft = { ...state.drafts.get(key) };
     for (const [field, node] of Object.entries(form.nodes)) {
-      if (node.value !== form.values[field]) draft[field] = node.value;
+      if (node.value !== form.values[field]) {
+        if (!state.pending.has(`edit:${key}`) && state.baseValues.has(key) && sameEditValue(field, node.value, state.baseValues.get(key)[field])) delete draft[field];
+        else draft[field] = node.value;
+      }
       form.values[field] = node.value;
     }
     if (Object.keys(draft).length) state.drafts.set(key, draft);
+    else state.drafts.delete(key);
     persistDrafts();
   }
   function bindDraft(key, nodes) {
@@ -515,31 +747,137 @@ function mountPlaces(ctx) {
     captureDraft(key);
     return { ...forms.get(key)?.values };
   };
+  const placeEditValues = (place) => ({
+    name: place.name ?? '', desc: place.desc ?? '', style: place.style ?? '',
+    aliases: (place.aliases ?? []).join('、'), tags: (place.tags ?? []).join('、'),
+    kind: place.kind ?? '', scene: place.scene ?? '', funVenue: place.funVenue ?? '',
+    relationsJson: JSON.stringify((place.relations ?? []).map(({ placeId, note }) => ({ placeId, note }))),
+  });
+  function sameEditValue(field, left, right) {
+    const comparable = (value) => {
+      if (field === 'aliases' || field === 'tags') return JSON.stringify([...new Set(String(value ?? '').split(/[、,，]/).map((part) => part.trim()).filter(Boolean))]);
+      if (field === 'relationsJson') {
+        try {
+          const rows = JSON.parse(value || '[]');
+          if (Array.isArray(rows)) return JSON.stringify(rows.map((row) => ({ placeId: String(row?.placeId ?? '').trim(), note: String(row?.note ?? '').trim() })));
+        } catch { /* Invalid input remains a distinct draft until validation. */ }
+      }
+      return String(value ?? '').trim();
+    };
+    return comparable(left) === comparable(right);
+  }
+  function editPayload(id, values) {
+    return {
+      id, expectedRevision: state.baseRevisions.get(id),
+      name: String(values.name ?? '').trim(), desc: values.desc,
+      style: String(values.style ?? '').trim(),
+      aliases: String(values.aliases ?? '').split(/[、,，]/).map((part) => part.trim()).filter(Boolean),
+      tags: String(values.tags ?? '').split(/[、,，]/).map((part) => part.trim()).filter(Boolean),
+      kind: values.kind, scene: String(values.scene ?? '').trim(), funVenue: String(values.funVenue ?? '').trim(),
+      relations: JSON.parse(values.relationsJson || '[]'),
+    };
+  }
+  function storeRebasedDraft(id, current, values, advanceBase = true) {
+    const currentValues = placeEditValues(current);
+    const draft = {};
+    for (const field of Object.keys(currentValues)) {
+      if (!sameEditValue(field, values[field], currentValues[field])) draft[field] = values[field];
+    }
+    if (Object.keys(draft).length) state.drafts.set(id, draft);
+    else state.drafts.delete(id);
+    if (advanceBase) {
+      state.baseValues.set(id, currentValues);
+      state.baseRevisions.set(id, current.revision);
+    }
+    const index = state.data.places.findIndex((place) => place.id === id);
+    if (index >= 0) state.data.places[index] = { ...state.data.places[index], ...current };
+    forms.delete(id);
+    persistDrafts();
+    return { ...currentValues, ...draft };
+  }
+  function mergeEditConflict(id, current) {
+    captureDraft(id);
+    const base = state.baseValues.get(id) ?? placeEditValues(current);
+    const mine = { ...base, ...state.drafts.get(id) };
+    const saved = placeEditValues(current);
+    const merged = {};
+    const fields = [];
+    for (const field of Object.keys(saved)) {
+      const localChanged = !sameEditValue(field, mine[field], base[field]);
+      const remoteChanged = !sameEditValue(field, saved[field], base[field]);
+      merged[field] = localChanged ? mine[field] : saved[field];
+      if (localChanged && remoteChanged && !sameEditValue(field, mine[field], saved[field])) fields.push({ field, base: base[field], mine: mine[field], current: saved[field] });
+    }
+    if (fields.length) state.conflicts.set(id, { current, fields });
+    else state.conflicts.delete(id);
+    const values = storeRebasedDraft(id, current, merged, !fields.length);
+    return { values, fields };
+  }
+  function resolveEditConflict(id, field, useCurrent) {
+    const conflict = state.conflicts.get(id);
+    if (!conflict) return;
+    const values = formValues(id);
+    const selected = field ? conflict.fields.filter((entry) => entry.field === field) : conflict.fields;
+    for (const entry of selected) {
+      if (useCurrent) values[entry.field] = entry.current;
+    }
+    conflict.fields = conflict.fields.filter((entry) => !selected.includes(entry));
+    if (!conflict.fields.length) state.conflicts.delete(id);
+    storeRebasedDraft(id, conflict.current, values, !conflict.fields.length);
+    setMessage(language === 'en' ? 'Choices kept in your draft. Save again; newer changes will be checked.' : '选择已保留在草稿中，请再保存；若记录再次变化会重新比较。');
+    render();
+  }
+  function editConflictPanel(id) {
+    const conflict = state.conflicts.get(id);
+    if (!conflict) return null;
+    const labels = { name: language === 'en' ? 'Name' : '名字', desc: t.detailDesc, style: t.detailStyle, aliases: t.detailAliases,
+      tags: t.detailTags, kind: language === 'en' ? 'Kind' : '归类', scene: t.detailScene, funVenue: t.detailFunVenue, relationsJson: t.relationLabel };
+    const shown = (value) => String(value ?? '') || (language === 'en' ? '(empty)' : '（空）');
+    return el('div', { class: 'map-msg map-msg-bad map-edit-conflicts', role: 'alert' },
+      el('div', { text: language === 'en' ? 'Only these fields changed differently. Other edits have been merged; your draft is preserved.' : '只有以下字段双方改成了不同内容，需要逐项选择；其他改动已自动合并，草稿仍保留。' }),
+      ...conflict.fields.map((entry) => el('div', { class: 'map-field map-edit-conflict', 'data-field': entry.field },
+        el('strong', { text: labels[entry.field] }),
+        el('div', { text: `${language === 'en' ? 'Base' : '原始内容'}：${shown(entry.base)}` }),
+        el('div', { text: `${language === 'en' ? 'My draft' : '我的草稿'}：${shown(forms.get(id)?.nodes[entry.field]?.value ?? entry.mine)}` }),
+        el('div', { text: `${language === 'en' ? 'Current saved' : '当前已保存'}：${shown(entry.current)}` }),
+        el('button', { type: 'button', text: language === 'en' ? `Keep mine: ${labels[entry.field]}` : `保留我的：${labels[entry.field]}`, onclick: () => resolveEditConflict(id, entry.field, false) }),
+        el('button', { type: 'button', text: language === 'en' ? `Use current: ${labels[entry.field]}` : `采用当前：${labels[entry.field]}`, onclick: () => resolveEditConflict(id, entry.field, true) }))),
+      el('div', { class: 'map-note', text: language === 'en' ? 'The following actions apply only to the remaining conflicting fields.' : '以下操作仅处理尚未选择的冲突字段，其他已合并的改动会保留。' }),
+      el('button', { type: 'button', text: '载入当前版本', onclick: () => resolveEditConflict(id, null, true) }),
+      el('button', { type: 'button', text: '保留草稿，确认覆盖', onclick: () => resolveEditConflict(id, null, false) }));
+  }
   function clearAllDrafts() {
     forms.clear();
     state.drafts.clear();
+    state.baseValues.clear();
+    state.baseRevisions.clear();
+    state.conflicts.clear();
     state.restoredDrafts = null;
     if (state.draftTimer) clearTimeout(state.draftTimer);
     state.draftTimer = null;
     state.draftsLoaded = false;
   }
 
-  /** 取/缓一处地方的图。失败就当没图——面板不能因为一张图挂掉。 */
-  const coverOf = async (id) => {
-    if (state.covers.has(id)) return state.covers.get(id);
+  /** 同一轮里，住所横幅、卡片和详情共享一份封面请求。 */
+  const coverRequests = new Map();
+  function coverOf(id) {
+    if (state.covers.has(id)) return Promise.resolve(state.covers.get(id));
     const version = state.loadVersion;
-    try {
-      const r = await call('cover', [{ id }]);
-      if (version !== state.loadVersion || ctx.signal?.aborted) return '';
-      const url = r?.dataUrl ?? '';
-      state.covers.set(id, url);
-      return url;
-    } catch {
-      if (version !== state.loadVersion || ctx.signal?.aborted) return '';
-      state.covers.set(id, '');
-      return '';
-    }
-  };
+    const pending = coverRequests.get(id);
+    if (pending?.version === version) return pending.promise;
+    const request = {
+      version,
+      promise: call('cover', [{ id }]).then((result) => result?.dataUrl ?? '', () => '').then((url) => {
+        if (version !== state.loadVersion || ctx.signal?.aborted) return '';
+        state.covers.set(id, url);
+        return url;
+      }).finally(() => {
+        if (coverRequests.get(id) === request) coverRequests.delete(id);
+      }),
+    };
+    coverRequests.set(id, request);
+    return request.promise;
+  }
 
   // -------------------------------------------------------------------------
   // 顶部：统计 + 地形选择 + 加一处
@@ -800,6 +1138,180 @@ function mountPlaces(ctx) {
     return panel;
   }
 
+  function sortLabel(sort) {
+    return { kind: t.sortKind, updated: t.sortUpdated, viewed: t.sortViewed, name: t.sortName,
+      frequent: t.sortFrequent, cover: t.sortCover, completeness: t.sortCompleteness }[sort] ?? t.sortKind;
+  }
+
+  function sortPlaces(items) {
+    const copy = [...items];
+    const recentIndex = (id, list) => { const index = list.indexOf(id); return index < 0 ? 999 : index; };
+    if (state.sort === 'name') return copy.sort((a, b) => a.name.localeCompare(b.name));
+    if (state.sort === 'frequent') return copy.sort((a, b) => Number(b.frequent) - Number(a.frequent) || a.name.localeCompare(b.name));
+    if (state.sort === 'cover') return copy.sort((a, b) => Number(b.hasCover) - Number(a.hasCover) || a.name.localeCompare(b.name));
+    if (state.sort === 'completeness') return copy.sort((a, b) => completeness(b).localeCompare(completeness(a), undefined, { numeric: true }) || a.name.localeCompare(b.name));
+    if (state.sort === 'viewed') return copy.sort((a, b) => recentIndex(a.id, state.recentViewed) - recentIndex(b.id, state.recentViewed) || a.name.localeCompare(b.name));
+    if (state.sort === 'updated') return copy.sort((a, b) => Number(b.modifiedAt || 0) - Number(a.modifiedAt || 0) || recentIndex(a.id, state.recentEdited) - recentIndex(b.id, state.recentEdited) || a.name.localeCompare(b.name));
+    return copy;
+  }
+
+  function saveCurrentView() {
+    state.savingView = true;
+    state.pendingViewName = '';
+    render();
+  }
+
+  function viewObject(name) {
+    return { id: `view-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, name,
+      query: state.query, filter: state.filter, tagFilter: state.tagFilter, view: state.view, sort: state.sort };
+  }
+
+  function savedViewsBar() {
+    const row = el('div', { class: 'map-saved-views', 'aria-label': t.savedViews });
+    row.appendChild(el('span', { class: 'map-dim', text: `${t.savedViews}：` }));
+    for (const saved of state.savedViews) {
+      const active = ['query', 'filter', 'tagFilter', 'sort', 'view'].every((key) => saved[key] === state[key]);
+      row.appendChild(el('button', {
+        type: 'button', class: active ? 'map-saved-view map-saved-view-active' : 'map-saved-view', text: saved.name,
+        'aria-pressed': String(active), title: `${saved.query || saved.name} · ${sortLabel(saved.sort)}`,
+        onclick: () => { Object.assign(state, { query: saved.query, filter: saved.filter, tagFilter: saved.tagFilter, view: saved.view, sort: saved.sort }); render(); },
+      }));
+      row.appendChild(el('button', { type: 'button', class: 'map-dim', text: '×', title: t.removeView, 'aria-label': `${t.removeView}: ${saved.name}`,
+        onclick: async () => {
+          if (!(await askConfirm(ctx, t.deleteViewConfirm))) return;
+          state.savedViews = state.savedViews.filter((item) => item.id !== saved.id); persistPrefs(); render();
+        } }));
+    }
+    if (state.savingView) {
+      const input = el('input', { type: 'text', placeholder: t.viewName, 'aria-label': t.viewName, value: state.pendingViewName,
+        oninput: (event) => { state.pendingViewName = event.target.value; } });
+      row.appendChild(input);
+      row.appendChild(el('button', { type: 'button', text: t.saveView, onclick: () => {
+        const name = String(state.pendingViewName || '').trim();
+        if (!name) { input.focus?.(); return; }
+        if (Array.from(name).length > 40 || state.savedViews.length >= 8 || state.query.length > 160) {
+          setMessage(language === 'en' ? 'Use a name of at most 40 characters, a search of at most 160, and at most 8 views.' : '名称最多 40 字、搜索最多 160 字，最多保存 8 个视图。', false);
+          render(); return;
+        }
+        state.savedViews = [...state.savedViews, viewObject(name)];
+        state.savingView = false; state.pendingViewName = ''; persistPrefs(); setMessage(t.viewSaved, true); render();
+      } }));
+      row.appendChild(el('button', { type: 'button', text: t.addCancel, onclick: () => { state.savingView = false; render(); } }));
+    } else row.appendChild(el('button', { type: 'button', class: 'map-saved-view', text: t.saveView, onclick: saveCurrentView }));
+    return row;
+  }
+
+  function sortPlacesByModified() {
+    const rank = (id) => { const value = state.recentEdited.indexOf(id); return value < 0 ? 999 : value; };
+    return [...state.data.places].filter((p) => p.modifiedAt > 0 || state.recentEdited.includes(p.id))
+      .sort((a, b) => Number(b.modifiedAt || 0) - Number(a.modifiedAt || 0) || rank(a.id) - rank(b.id)).map((p) => p.id);
+  }
+
+  function recentStrip(key, label, className) {
+    const ids = (key === 'recentEdited' ? sortPlacesByModified() : state[key]).filter((id) => state.data.places.some((place) => place.id === id)).slice(0, 5);
+    if (!ids.length) return null;
+    return el('div', { class: `map-saved-views ${className}`, 'aria-label': label },
+      el('span', { class: 'map-dim', text: `${label}：` }),
+      ...ids.map((id) => {
+        const place = state.data.places.find((item) => item.id === id);
+        return el('button', { type: 'button', class: 'map-saved-view', text: place?.name ?? id, onclick: () => openPlace(id, { detached: true }) });
+      }));
+  }
+
+  function refreshRecentStrips() {
+    const area = head.querySelector('.map-recent-row');
+    if (!area || !state.data) return;
+    const viewed = recentStrip('recentViewed', t.recentViewed, 'map-recent-viewed');
+    const edited = recentStrip('recentEdited', t.recentEdited, 'map-recent-edited');
+    area.replaceChildren(...[viewed, edited].filter(Boolean));
+  }
+
+  function coverInventoryPanel() {
+    const inventory = state.coverInventory;
+    if (!inventory) return null;
+    const en = language === 'en';
+    const blocked = Boolean(state.resourcesBusy || inventory.warnings?.length || inventory.missing?.length || !inventory.revision);
+    const panel = el('div', { class: 'map-resource-list', 'aria-label': t.coverInventory });
+    const names = Object.fromEntries(state.data.places.map((p) => [p.id, p.name]));
+    const sourceLabels = en ? {} : { current: '当前地点', saved: '最近保存', undo: '删除撤销', disk: '本地记录', backup: '上一版备份', recovery: '导入恢复点', corrupt: '损坏记录副本' };
+    const refsText = (refs) => refs.map((ref) => `${names[ref.placeId] || ref.placeId || (en ? 'unknown' : '未知')} (${sourceLabels[ref.source] || ref.source})`).join('、');
+    for (const file of inventory.files ?? []) {
+      const refs = file.references ?? [];
+      const canSelect = !blocked && file.archiveable && !refs.length;
+      const checkbox = canSelect ? el('input', {
+        type: 'checkbox', checked: state.coverSelected.has(file.filename), 'aria-label': `${en ? 'Archive' : '归档'} ${file.filename}`,
+        onchange: (event) => {
+          if (event.target.checked) state.coverSelected.add(file.filename);
+          else state.coverSelected.delete(file.filename);
+          renderHead();
+        },
+      }) : null;
+      panel.appendChild(el('div', { class: refs.length ? 'map-resource' : 'map-resource map-resource-unref' },
+        el('div', { class: 'map-resource-name' }, checkbox, file.filename),
+        el('div', { class: 'map-resource-meta', text: `${Math.ceil(file.bytes / 1024)} KiB · ${refs.length ? `${t.coverUsed} ${refs.length}` : t.coverNoRefs}` }),
+        refs.length ? el('div', { class: 'map-resource-meta', text: refsText(refs) }) : null));
+    }
+    for (const missing of inventory.missing ?? []) panel.appendChild(el('div', { class: 'map-resource map-resource-missing' },
+      el('div', { class: 'map-resource-name', text: missing.filename }),
+      el('div', { class: 'map-resource-meta', text: t.coverMissing }),
+      el('div', { class: 'map-resource-meta', text: refsText(missing.references ?? []) })));
+    if (inventory.warnings?.length) panel.appendChild(el('div', { class: 'map-note', text: inventory.warnings.map((warning) => `${warning.source}: ${warning.code}`).join(' · ') }));
+    if (!(inventory.files?.length || inventory.missing?.length)) panel.appendChild(el('div', { class: 'map-note', text: en ? 'No photo files found.' : '没有图片文件。' }));
+    const total = (inventory.files ?? []).reduce((sum, file) => sum + file.bytes, 0);
+    panel.appendChild(el('div', { class: 'map-note', text: `${inventory.files?.length || 0} ${en ? 'files' : '个文件'} · ${(total / 1048576).toFixed(2)} MiB` }));
+    panel.appendChild(el('div', { class: 'map-note', text: en
+      ? 'Archive moves only selected photos with no known references. Photos stay recoverable and still use disk space. External backups are outside this check.'
+      : '只将勾选且未发现引用的图片移入可恢复归档，不永久删除，也不释放磁盘空间。检查范围不含数据目录外的手动备份。' }));
+    const selected = [...state.coverSelected].filter((name) => inventory.files.some((file) => file.filename === name && file.archiveable));
+    panel.appendChild(el('button', {
+      type: 'button', text: en ? `Archive selected (${selected.length})` : `归档所选图片（${selected.length}）`,
+      disabled: blocked || !selected.length,
+      onclick: async () => {
+        if (blocked || !selected.length || state.resourcesBusy) return;
+        const message = `${en ? 'Move these files into a recoverable archive?' : '将以下文件移入可恢复归档？'}\n${selected.join('\n')}`;
+        if (!(await askConfirm(ctx, message)) || state.resourcesBusy) return;
+        state.resourcesBusy = true;
+        renderHead();
+        try {
+          await call('archiveCovers', [{ filenames: selected, expectedRevision: inventory.revision }]);
+          setMessage(en ? 'Photos archived; restore them below when needed.' : '图片已归档，可在下方恢复。');
+          await inspectCovers();
+        } catch (err) { setMessage(String(err?.message ?? err), false); }
+        finally { state.resourcesBusy = false; renderHead(); }
+      },
+    }));
+    for (const archive of state.coverArchives) {
+      if (archive.status === 'restored') continue;
+      panel.appendChild(el('div', { class: 'map-resource map-cover-archive' },
+        el('div', { class: 'map-resource-name', text: `${en ? 'Archive' : '归档'} · ${archive.createdAt}` }),
+        el('div', { class: 'map-resource-meta', text: (archive.files ?? []).map((file) => file.filename).join('、') }),
+        el('button', { type: 'button', text: en ? 'Restore archive' : '恢复归档', disabled: state.resourcesBusy,
+          onclick: async () => {
+            if (state.resourcesBusy || !(await askConfirm(ctx, en ? 'Restore these photos? Existing files will not be overwritten.' : '恢复这些图片？已有文件不会被覆盖。'))) return;
+            state.resourcesBusy = true; renderHead();
+            try {
+              await call('restoreCoverArchive', [{ id: archive.id }]);
+              setMessage(en ? 'Archive restored' : '归档已恢复');
+              await inspectCovers();
+            } catch (err) { setMessage(String(err?.message ?? err), false); }
+            finally { state.resourcesBusy = false; renderHead(); }
+          } })));
+    }
+    return panel;
+  }
+
+  async function inspectCovers() {
+    try {
+      const [result, archiveResult] = await Promise.all([ctx.invoke('inspectCovers', []), ctx.invoke('listCoverArchives', [])]);
+      if (result?.ok === false) throw new Error(result.error ?? t.loadFail);
+      if (archiveResult?.ok === false) throw new Error(archiveResult.error ?? t.loadFail);
+      state.coverInventory = result;
+      state.coverArchives = archiveResult?.archives ?? [];
+      state.coverSelected.clear();
+      if (state.data) renderHead();
+    } catch (err) { setMessage(String(err?.message ?? err), false); if (state.data) renderHead(); }
+  }
+
   function renderHead() {
     const d = state.data;
     captureDraft('new');
@@ -812,119 +1324,144 @@ function mountPlaces(ctx) {
     if (state.restoredDrafts?.length) {
       head.appendChild(el('div', { class: 'map-msg map-msg-bad' },
         el('span', { text: `检测到 ${state.restoredDrafts.length} 份未保存草稿。` }),
-        el('button', { type: 'button', text: '恢复草稿', onclick: () => { state.restoredDrafts = null; state.expanded = [...state.drafts.keys()].find((id) => id !== 'new') ?? null; state.adding = state.drafts.has('new'); render(); } }),
+        el('button', { type: 'button', text: '恢复草稿', onclick: () => { state.restoredDrafts = null; state.expanded = [...state.drafts.keys()].find((id) => id !== 'new') ?? null; state.editing = Boolean(state.expanded); state.detached = state.editing; state.trail = []; state.adding = state.drafts.has('new'); render(); } }),
         el('button', { type: 'button', text: '丢弃草稿', onclick: async () => { clearAllDrafts(); await ctx.invoke('saveDrafts', [{ drafts: [] }]); state.draftsLoaded = true; render(); } })));
     }
 
-    head.appendChild(el('div', { class: 'map-stats' },
+    const toolbar = el('div', { class: 'map-toolbar' });
+    const filterRow = el('div', { class: 'map-filter-row' });
+    const search = el('input', {
+      type: 'search', placeholder: t.search, 'aria-label': t.search,
+      value: state.query,
+      oninput: (ev) => { state.query = ev.target.value; renderBody(); },
+    });
+    const refreshFilters = () => { drawFilters(); renderBody(); };
+    const changeFilter = (value) => { state.filter = value; refreshFilters(); };
+    toolbar.appendChild(search);
+    const views = el('div', { class: 'map-view', role: 'group', 'aria-label': language === 'en' ? 'View' : '视图' });
+    for (const [value, label] of [['cards', t.cardsView], ['relations', t.relationsView]]) {
+      views.appendChild(el('button', {
+        type: 'button', text: label, 'aria-pressed': String(state.view === value),
+        disabled: state.batchMode && value === 'relations',
+        onclick: () => {
+          state.view = value;
+          for (const button of views.children) button.setAttribute('aria-pressed', String(button.textContent === label));
+          renderBody();
+        },
+      }));
+    }
+    toolbar.appendChild(views);
+    toolbar.appendChild(el('button', {
+      class: state.adding ? '' : 'map-btn-primary', type: 'button',
+      text: state.adding ? t.addCancel : t.addOpen,
+      onclick: () => { state.adding = !state.adding; render(); },
+    }));
+    toolbar.appendChild(el('button', {
+      type: 'button', text: t.manage, 'aria-expanded': String(state.managing), 'aria-controls': 'little-world-management',
+      disabled: Boolean(activeTransfer?.writing),
+      onclick: () => {
+        if (activeTransfer?.writing) return;
+        state.managing = !state.managing;
+        if (!state.managing) {
+          activeTransfer = null;
+          state.batchMode = false;
+          state.selectedIds.clear();
+        }
+        render();
+      },
+    }));
+    head.appendChild(toolbar);
+
+    function drawFilters() {
+      const en = language === 'en';
+      const filterValues = [
+        ['all', en ? 'All' : '全部'], ['frequent', en ? 'Frequent' : '常去'],
+        ['hasCover', en ? 'With photo' : '有图'], ['noDesc', en ? 'Missing description' : '缺描写'],
+        ['noCover', en ? 'Missing photo' : '缺图'], ['noRelation', en ? 'No relations' : '缺关系'],
+      ];
+      const quickFilters = el('div', { class: 'map-quick-filters', role: 'group', 'aria-label': t.quickFilters },
+        ...filterValues.slice(0, 4).map(([value, label]) => el('button', {
+          type: 'button', class: state.filter === value ? 'map-qf map-qf-on' : 'map-qf',
+          'aria-pressed': String(state.filter === value), text: label,
+          onclick: () => changeFilter(value),
+        })));
+      const filter = el('select', { 'aria-label': t.filterLabel, onchange: (ev) => changeFilter(ev.target.value) },
+        ...filterValues.map(([value, label]) => el('option', { value, text: label })));
+      filter.value = state.filter;
+      const allTags = [...new Set(d.places.flatMap((p) => p.tags ?? []))].sort((a, b) => a.localeCompare(b));
+      const tagFilter = el('select', {
+        class: 'map-tag-filter', 'aria-label': t.tagFilter,
+        onchange: (ev) => { state.tagFilter = ev.target.value; renderBody(); },
+      }, el('option', { value: '', text: t.allTags }), ...allTags.map((tag) => el('option', { value: tag, text: tag })));
+      tagFilter.value = state.tagFilter;
+      const sortValues = [
+        ['kind', t.sortKind], ['updated', t.sortUpdated], ['viewed', t.sortViewed],
+        ['name', t.sortName], ['frequent', t.sortFrequent], ['cover', t.sortCover], ['completeness', t.sortCompleteness],
+      ];
+      const sortSelect = el('select', { 'aria-label': t.sortLabel, onchange: (event) => { state.sort = event.target.value; renderBody(); } },
+        ...sortValues.map(([value, label]) => el('option', { value, text: label })));
+      sortSelect.value = state.sort;
+      const sortRow = el('div', { class: 'map-sort-row' }, el('label', { text: `${t.sortLabel}：` }), sortSelect);
+      const extra = el('div', { class: 'map-filter-extra', id: 'little-world-extra-filters', hidden: !state.filtersOpen }, filter, tagFilter, sortRow, savedViewsBar());
+      const toggle = el('button', {
+        type: 'button', text: en ? 'More filters' : '更多筛选',
+        'aria-controls': 'little-world-extra-filters', 'aria-expanded': String(state.filtersOpen),
+        onclick: () => {
+          state.filtersOpen = !state.filtersOpen;
+          toggle.setAttribute('aria-expanded', String(state.filtersOpen));
+          if (state.filtersOpen) extra.removeAttribute('hidden');
+          else extra.setAttribute('hidden', '');
+        },
+      });
+      filterRow.replaceChildren(quickFilters, toggle, extra);
+    }
+    drawFilters();
+    head.appendChild(filterRow);
+    head.appendChild(el('div', { class: 'map-recent-row' }));
+    refreshRecentStrips();
+    if (state.managing) head.appendChild(management(d));
+    if (state.undo) head.appendChild(undoBar());
+    if (state.adding) head.appendChild(addForm());
+  }
+
+  function management(d) {
+    const panel = el('section', { class: 'map-manage map-zone-manage', id: 'little-world-management', 'aria-label': t.manage });
+    panel.appendChild(el('div', { class: 'map-stats' },
       el('div', { class: 'map-stat' }, el('b', { text: String(d.summary.total) }), el('span', { text: t.statsTotal })),
       el('div', { class: 'map-stat' }, el('b', { text: String(d.summary.withCover) }), el('span', { text: t.statsCover })),
       el('div', { class: 'map-stat' }, el('b', { text: String(d.summary.frequent) }), el('span', { text: t.statsFreq }))));
 
-    const bar = el('div', { class: 'map-bar' });
-
-    // 地形：**一排按钮**，不用 <select>。
-    //
-    // 为什么换掉下拉（2026-11-15 两次真机反馈「点不动」）：
-    //   ① 占位项的文字原本是「当前地形名」，值是空串——看着像已选中，点它什么都不发生；
-    //   ② 更关键：`<select>` 依赖 `change`/`input` 事件，在内嵌 webview 里并不可靠，
-    //      出过「选了没反应」后完全无从排查。按钮的 `click` 没有这层不确定性。
-    // 现在每套地形是一个明确的按钮，点一下就是「我要加这一套」。
-    const terrainRow = el('div', { class: 'map-terrains' });
-    for (const x of d.terrains) {
-      const partial = x.skeletons?.some((s) => s.exists) ? ' ·部分已加' : '';
-      const active = state.terrainPick === x.id;
+    const terrainRow = el('div', { class: 'map-terrains', role: 'group', 'aria-label': t.addPreset });
+    for (const terrain of d.terrains) {
+      const active = state.terrainPick === terrain.id;
       terrainRow.appendChild(el('button', {
-        type: 'button',
-        class: active ? 'map-terrain map-terrain-on' : 'map-terrain',
-        title: `${x.label}：${x.count} 处${partial}${x.note ? ' · ' + x.note : ''}`,
-        text: `${active ? '▾' : '＋'} ${x.label}`,
-        onclick: () => { chooseTerrain(x.id); },
+        type: 'button', class: active ? 'map-terrain map-terrain-on' : 'map-terrain',
+        'aria-expanded': String(active), text: `${active ? '▾' : '＋'} ${terrain.label}`,
+        title: terrain.note ?? '', onclick: () => chooseTerrain(terrain.id),
       }));
     }
-    bar.appendChild(terrainRow);
-
-    if (d.terrainLabel) {
-      bar.appendChild(el('span', { class: 'map-chip', text: `${t.terrainNow}：${d.terrainLabel}` }));
-    }
-
-    bar.appendChild(el('button', {
-      class: state.adding ? '' : 'map-btn-primary',
-      type: 'button',
-      text: state.adding ? t.addCancel : t.addOpen,
-      onclick: () => { state.adding = !state.adding; render(); },
-    }));
-
-    // 批量管理：进得去也要出得来，所以同一个按钮在上面写成「完成选择」。
-    bar.appendChild(el('button', {
-      type: 'button',
-      'aria-pressed': state.batchMode ? 'true' : 'false',
-      text: state.batchMode ? t.batchDone : t.batchOpen,
-      onclick: () => {
-        state.batchMode = !state.batchMode;
-        state.selectedIds.clear();
-        render();
-      },
-    }));
-
-    // 手动刷新：万一界面停在旧状态（宿主没刷新、或我们某次渲染出错），
-    // 不用重开 Coo 也能自愈。这类「点不动」最后多半是这个救回来的。
-    bar.appendChild(el('button', {
-      type: 'button',
-      text: t.refresh,
-      title: t.refreshHint,
-      onclick: () => { state.terrainPick = ''; state.picked = null; state.message = null; void load(); },
-    }));
-
-    head.appendChild(bar);
-
-    const search = el('input', {
-      type: 'search', placeholder: '搜索名称、别名、地形', 'aria-label': '搜索名称、别名、地形',
-      value: state.query ?? '',
-      oninput: (ev) => { state.query = ev.target.value; renderBody(); },
-    });
-    const filter = el('select', { 'aria-label': '筛选地点', onchange: (ev) => { state.filter = ev.target.value; renderBody(); } },
-      el('option', { value: 'all', text: '全部' }),
-      el('option', { value: 'noDesc', text: '缺描写' }),
-      el('option', { value: 'noCover', text: '缺图' }),
-      el('option', { value: 'hasCover', text: '有图' }),
-      el('option', { value: 'frequent', text: '常去' }));
-    filter.value = state.filter ?? 'all';
-    const tagSearch = el('input', { type: 'search', placeholder: t.tagQuery, 'aria-label': t.tagQuery,
-      value: state.tagQuery ?? '', oninput: (ev) => { state.tagQuery = ev.target.value; renderBody(); } });
-    const allTags = [...new Set(d.places.flatMap((p) => Array.isArray(p.tags) ? p.tags : []))].sort((a, b) => a.localeCompare(b));
-    const tagFilter = el('select', { class: 'map-tag-filter', 'aria-label': t.tagFilter, onchange: (ev) => { state.tagFilter = ev.target.value; renderBody(); } },
-      el('option', { value: '', text: t.allTags }), ...allTags.map((tag) => el('option', { value: tag, text: tag })));
-    tagFilter.value = state.tagFilter ?? '';
-    const view = el('select', { class: 'map-view', 'aria-label': '视图', onchange: (ev) => { state.view = ev.target.value; renderBody(); } },
-      el('option', { value: 'cards', text: t.cardsView }), el('option', { value: 'relations', text: t.relationsView }));
-    view.value = state.view ?? 'cards';
-    head.appendChild(el('div', { class: 'map-bar' }, search, filter, tagSearch, tagFilter, view));
-
-    // 常用筛选：一键切换，不用每次把「条件」重新组一遍。
-    // 和上面那个 <select> 共用 `state.filter`，两处永远同步（点完 head 会重画）。
-    const quickFilters = [
-      ['all', language === 'en' ? 'All' : '全部'],
-      ['frequent', language === 'en' ? 'Frequent' : '常去'],
-      ['hasCover', language === 'en' ? 'With photo' : '有图'],
-      ['noDesc', language === 'en' ? 'Missing description' : '缺描写'],
-    ];
-    head.appendChild(el('div', { class: 'map-quick-filters', role: 'group', 'aria-label': t.quickFilters },
-      ...quickFilters.map(([value, label]) => el('button', {
-        type: 'button',
-        class: (state.filter ?? 'all') === value ? 'map-qf map-qf-on' : 'map-qf',
-        'aria-pressed': (state.filter ?? 'all') === value ? 'true' : 'false',
-        text: label,
-        onclick: () => { state.filter = value; render(); },
-      }))));
-
-    head.appendChild(transferControls());
-
-    if (state.batchMode) head.appendChild(batchToolbar());
-    else if (state.undo) head.appendChild(undoBar());
-
-    if (state.terrainPick) head.appendChild(picker(state.terrainPick));
-    if (state.adding) head.appendChild(addForm());
+    panel.appendChild(el('div', { class: 'map-bar' }, terrainRow,
+      el('button', {
+        type: 'button', 'aria-pressed': String(state.batchMode), text: state.batchMode ? t.batchDone : t.batchOpen,
+        onclick: () => {
+          state.batchMode = !state.batchMode;
+          state.selectedIds.clear();
+          if (state.batchMode) state.view = 'cards';
+          render();
+        },
+      }),
+      el('button', {
+        type: 'button', text: t.refresh, title: t.refreshHint,
+        onclick: () => { state.terrainPick = ''; state.picked = null; state.message = null; void load(); },
+      })));
+    if (state.terrainPick) panel.appendChild(picker(state.terrainPick));
+    if (state.batchMode) panel.appendChild(batchToolbar());
+    panel.appendChild(el('div', { class: 'map-bar' },
+      el('button', { type: 'button', text: t.inspectCovers, onclick: () => { void inspectCovers(); } }),
+      state.coverInventory ? el('button', { type: 'button', text: t.close, onclick: () => { state.coverInventory = null; render(); } }) : null));
+    if (state.coverInventory) panel.appendChild(coverInventoryPanel());
+    panel.appendChild(transferControls());
+    return panel;
   }
 
   /**
@@ -1227,7 +1764,7 @@ function mountPlaces(ctx) {
         }
       },
     });
-    return el('div', { class: 'map-detail', style: { marginBottom: '12px' } },
+    return el('div', { class: 'map-detail map-zone-edit', style: { marginBottom: '12px' } },
       el('div', { class: 'map-field' }, el('label', { text: t.addName }), name),
       el('div', { class: 'map-field-row' },
         el('div', { class: 'map-field' }, el('label', { text: t.addKind }), kind)),
@@ -1247,84 +1784,319 @@ function mountPlaces(ctx) {
    * 各写一份的话，界面上选中的和实际批量改的会悄悄对不上。
    */
   function filteredPlaces() {
-    const d = state.data;
-    const query = String(state.query ?? '').trim().toLocaleLowerCase();
-    const tagQuery = String(state.tagQuery ?? '').trim().toLocaleLowerCase();
-    return d.places.filter((p) => {
-      const terrain = [p.terrain, p.terrainLabel, d.terrainLabel].filter(Boolean).join(' ');
-      const tags = Array.isArray(p.tags) ? p.tags : [];
-      const hay = [p.name, ...(p.aliases ?? []), p.kindLabel, terrain, ...tags].filter(Boolean).join(' ').toLocaleLowerCase();
-      if (query && !hay.includes(query)) return false;
-      if (tagQuery && !tags.some((tag) => tag.toLocaleLowerCase().includes(tagQuery))) return false;
+    const words = state.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    return state.data.places.filter((p) => {
+      const tags = p.tags ?? [];
+      const hay = [p.name, ...(p.aliases ?? []), p.kindLabel, p.terrain, p.terrainLabel, ...tags]
+        .filter(Boolean).join(' ').toLocaleLowerCase();
+      if (!words.every((word) => hay.includes(word))) return false;
       if (state.tagFilter && !tags.includes(state.tagFilter)) return false;
-      switch (state.filter ?? 'all') {
+      switch (state.filter) {
         case 'noDesc': return !String(p.desc ?? '').trim();
         case 'noCover': return !p.hasCover;
         case 'hasCover': return Boolean(p.hasCover);
-        case 'frequent': return Boolean(p.frequent);
+        case 'noRelation': return Boolean(p.completeness?.orphan ?? !(p.relations?.length));
+        case 'frequent': return Boolean(p.frequent || p.kind === 'frequent');
         default: return true;
       }
     });
   }
 
+  function resultSummary(total, count) {
+    const row = el('div', { class: 'map-results' }, el('span', {
+      class: 'map-results-count', role: 'status', text: t.resultCount(total, count),
+    }));
+    const removeFilter = (label, clear) => el('button', {
+      type: 'button', class: 'map-chip', text: `${label} ×`,
+      'aria-label': `${t.reset}: ${label}`, onclick: () => { clear(); render(); },
+    });
+    if (state.query.trim()) row.appendChild(removeFilter(state.query.trim(), () => { state.query = ''; }));
+    if (state.tagFilter) row.appendChild(removeFilter(state.tagFilter, () => { state.tagFilter = ''; }));
+    if (state.filter !== 'all') {
+      const labels = language === 'en'
+        ? { frequent: 'Frequent', hasCover: 'With photo', noCover: 'Missing photo', noDesc: 'Missing description', noRelation: 'No relations' }
+        : { frequent: '常去', hasCover: '有图', noCover: '缺图', noDesc: '缺描写', noRelation: '缺关系' };
+      row.appendChild(removeFilter(labels[state.filter], () => { state.filter = 'all'; }));
+    }
+    if (state.filter !== 'all' || state.tagFilter || state.query.trim()) row.appendChild(el('button', {
+      type: 'button', text: t.reset,
+      onclick: () => { state.query = ''; state.tagFilter = ''; state.filter = 'all'; render(); },
+    }));
+    return row;
+  }
+
+  const focusPosition = ({ x = 50, y = 50 } = {}) => `${x}% ${y}%`;
+
+  function coverImage(p, className) {
+    if (!p.hasCover) return null;
+    const image = (src) => el('img', {
+      class: className, src, alt: p.name, loading: 'lazy',
+      style: className === 'map-thumb' ? { objectPosition: focusPosition(p.coverFocus) } : null,
+    });
+    const cached = state.covers.get(p.id);
+    if (cached) return image(cached);
+    if (state.covers.has(p.id)) return null;
+    const placeholder = el('div', { class: className, 'aria-hidden': 'true' });
+    void coverOf(p.id).then((url) => {
+      if (url && placeholder.parentNode) placeholder.parentNode.replaceChild(image(url), placeholder);
+    });
+    return placeholder;
+  }
+
+  function coverOrEmpty(p, className) {
+    return p.hasCover ? coverImage(p, className) : el('div', { class: `map-cover-empty ${className}`, text: t.noCoverLabel, 'aria-label': t.noCoverLabel });
+  }
+
+  function originalCover(p) {
+    const preview = coverImage(p, 'map-reading-cover');
+    if (!preview) return null;
+    const label = language === 'en' ? 'View full image' : '查看原图';
+    const dialog = el('dialog', { class: 'map-original', 'aria-label': label });
+    const trigger = el('button', {
+      type: 'button', class: 'map-original-trigger', 'aria-label': label, title: label,
+      onclick: async () => {
+        const src = await coverOf(p.id);
+        if (!src || trigger.isConnected === false || dialog.hasAttribute?.('open')) return;
+        dialog.replaceChildren(close, el('img', { src, alt: p.name }));
+        if (typeof dialog.showModal === 'function') dialog.showModal();
+        else dialog.setAttribute('open', '');
+        close.focus?.();
+      },
+    }, preview);
+    const close = el('button', {
+      type: 'button', text: language === 'en' ? 'Close image' : '关闭原图',
+      onclick: () => {
+        if (typeof dialog.close === 'function') dialog.close();
+        else dialog.removeAttribute('open');
+        trigger.focus?.({ preventScroll: true });
+      },
+    });
+    return el('div', {}, trigger, dialog);
+  }
+
+  function coverFocusSettings(p) {
+    const en = language === 'en';
+    const start = p.coverFocus ?? { x: 50, y: 50 };
+    const draft = { ...start };
+    const position = (value) => Math.round(Math.min(100, Math.max(0, value)));
+    let pointerId;
+    const point = (event) => {
+      const box = preview.getBoundingClientRect?.();
+      if (!box?.width || !box?.height) return;
+      setFocus((event.clientX - box.left) / box.width * 100, (event.clientY - box.top) / box.height * 100);
+    };
+    const marker = el('span', { 'aria-hidden': 'true' });
+    const original = el('img', { alt: p.name });
+    const crops = ['16 / 10', '16 / 9'].map((aspectRatio) => el('img', { alt: '', style: { aspectRatio } }));
+    const frames = [16 / 10, 16 / 9].map((ratio, index) => el('div', {
+      class: `map-focus-frame map-focus-frame-${index}`, 'aria-label': `${t.focusRule} ${index === 0 ? '16:10' : '16:9'}`,
+      title: `${index === 0 ? (en ? 'Banner' : '横幅') : (en ? 'Card' : '卡片')} ${index === 0 ? '16:10' : '16:9'}`,
+    }));
+    function drawFrames() {
+      const aspect = original.naturalWidth / original.naturalHeight;
+      if (!Number.isFinite(aspect) || aspect <= 0) return;
+      [16 / 10, 16 / 9].forEach((ratio, index) => {
+        const width = Math.min(1, ratio / aspect);
+        const height = Math.min(1, aspect / ratio);
+        Object.assign(frames[index].style, {
+          width: `${width * 100}%`, height: `${height * 100}%`, visibility: 'visible',
+          left: `${draft.x * (1 - width)}%`, top: `${draft.y * (1 - height)}%`, right: 'auto', bottom: 'auto',
+        });
+      });
+    }
+    original.addEventListener('load', drawFrames);
+    const preview = el('div', {
+      class: 'map-focus-preview map-focus-original',
+      onpointerdown: (event) => {
+        if (event.button !== 0 || !original.src) return;
+        pointerId = event.pointerId;
+        preview.setPointerCapture?.(pointerId);
+        point(event);
+      },
+      onpointermove: (event) => { if (pointerId !== undefined && event.pointerId === pointerId) point(event); },
+      onpointerup: () => { pointerId = undefined; }, onpointercancel: () => { pointerId = undefined; },
+      onlostpointercapture: () => { pointerId = undefined; },
+    }, original, ...frames, marker);
+    const ranges = ['x', 'y'].map((axis) => el('input', {
+      type: 'range', min: '0', max: '100', value: String(draft[axis]),
+      oninput: (event) => setFocus(axis === 'x' ? Number(event.target.value) : draft.x, axis === 'y' ? Number(event.target.value) : draft.y),
+    }));
+    function setFocus(x, y) {
+      draft.x = position(x);
+      draft.y = position(y);
+      marker.style.left = `${draft.x}%`;
+      marker.style.top = `${draft.y}%`;
+      ranges[0].value = String(draft.x);
+      ranges[1].value = String(draft.y);
+      for (const image of crops) image.style.objectPosition = focusPosition(draft);
+      drawFrames();
+    }
+    setFocus(start.x, start.y);
+    const status = el('span', { role: 'status', class: 'map-note' });
+    const save = el('button', {
+      type: 'button', text: en ? 'Save focus' : '保存焦点', disabled: true,
+      onclick: async () => {
+        if (save.disabled) return;
+        save.disabled = true;
+        status.textContent = '';
+        try {
+          await call('coverFocus', [{ id: p.id, x: draft.x, y: draft.y, expectedCover: p.cover, expectedRevision: p.revision }]);
+          setMessage(en ? 'Cover focus saved' : '封面焦点已保存');
+          await load();
+        } catch (err) {
+          status.textContent = String(err?.message ?? err);
+          save.disabled = false;
+        }
+      },
+    });
+    const settings = el('details', { class: 'map-focus-settings', ontoggle: () => {
+      if (!settings.open || original.getAttribute('src')) return;
+      void coverOf(p.id).then((src) => {
+        if (!src) { status.textContent = en ? 'Image unavailable' : '封面无法读取'; return; }
+        original.setAttribute('src', src);
+        for (const image of crops) image.setAttribute('src', src);
+        save.disabled = false;
+      });
+    } },
+      el('summary', { text: en ? 'Adjust cover focus' : '调整封面焦点' }),
+      el('p', { class: 'map-note', text: en ? 'Drag the marker on the original or use the sliders.' : '在原图上拖动焦点，也可以用滑块微调。' }),
+      el('div', { class: 'map-focus-grid' },
+        el('figure', {}, el('figcaption', { text: en ? 'Original' : '原图' }), preview),
+        ...crops.map((image, index) => el('figure', {},
+          el('figcaption', { text: index === 0 ? (en ? 'Home banner' : '住所横幅') : (en ? 'Place card' : '地点卡片') }),
+          el('div', { class: 'map-focus-preview', style: { cursor: 'default', touchAction: 'auto' } }, image)))),
+      el('div', { class: 'map-focus-controls', 'aria-label': t.presetFocus },
+        ...[[t.focusTop, 50, 15], [t.focusCenter, 50, 50], [t.focusBottom, 50, 85],
+          [en ? 'Left subject' : '主体靠左', 15, 50], [en ? 'Right subject' : '主体靠右', 85, 50]]
+          .map(([label, x, y]) => el('button', { type: 'button', text: label, onclick: () => setFocus(x, y) })),
+        el('button', { type: 'button', text: en ? 'Restore saved focus' : '恢复已保存焦点', onclick: () => setFocus(start.x, start.y) })),
+      el('div', { class: 'map-focus-controls' },
+        el('label', {}, en ? 'Horizontal' : '水平', ranges[0]),
+        el('label', {}, en ? 'Vertical' : '垂直', ranges[1]),
+        el('button', { type: 'button', text: en ? 'Center' : '居中', onclick: () => setFocus(50, 50) }), save, status));
+    return settings;
+  }
+
+  function homeBanner(p) {
+    const art = coverOrEmpty(p, 'map-thumb');
+    return el('section', { class: art ? 'map-home-banner' : 'map-home-banner map-home-text' },
+      art ? el('div', { class: 'map-home-art' }, art) : null,
+      el('div', { class: 'map-home-copy' },
+        el('div', { class: 'map-home-label', text: t.currentHome }),
+        el('h3', { text: p.name }),
+        p.desc ? el('p', { class: 'map-card-desc', text: p.desc }) : null,
+        el('button', { type: 'button', text: t.viewHome, onclick: () => openPlace(p.id, { detached: true }) })));
+  }
+
+  function renderBreadcrumbs(current) {
+    const path = [...state.trail.map((entry, trailIndex) => ({ id: entry.id, trailIndex })), { id: current?.id }].filter(({ id }) => id);
+    return el('nav', { class: 'map-breadcrumbs', 'aria-label': t.relationTrail },
+      el('span', { text: `${t.relationTrail}：` }),
+      ...path.map(({ id, trailIndex }, index) => {
+        const place = state.data.places.find((item) => item.id === id);
+        const isCurrent = index === path.length - 1;
+        return el('span', {}, index ? el('span', { text: ' / ', 'aria-hidden': 'true' }) : null,
+          isCurrent ? el('strong', { text: place?.name ?? id }) : el('button', { type: 'button', text: place?.name ?? id,
+            onclick: () => {
+              state.trail = state.trail.slice(0, trailIndex);
+              state.expanded = id;
+              state.detached = true;
+              state.editing = false;
+              renderBody();
+              focusDetail();
+            } }));
+      }));
+  }
+
   function renderBody() {
     const d = state.data;
-    for (const key of forms.keys()) if (key !== 'new') captureDraft(key);
-    for (const key of [...forms.keys()]) if (key !== 'new') forms.delete(key);
+    for (const key of [...forms.keys()]) {
+      if (key === 'new') continue;
+      captureDraft(key);
+      forms.delete(key);
+    }
+    relationAnchors.clear();
     body.replaceChildren();
     if (!d.places.length) {
       body.appendChild(el('div', { class: 'map-empty' },
-        el('strong', { text: t.emptyTitle }), el('div', { text: t.emptyHint })));
+        el('strong', { text: t.emptyTitle }), el('div', { text: t.emptyHint }),
+        el('button', { type: 'button', text: t.addPreset, onclick: () => { state.managing = true; render(); } })));
       return;
     }
-    const selected = filteredPlaces();
+    const sorted = sortPlaces(filteredPlaces());
+    const selected = [...sorted.filter((p) => state.pinned.includes(p.id)), ...sorted.filter((p) => !state.pinned.includes(p.id))];
+    const home = d.places.find((p) => p.id === d.homeId);
+    const expanded = d.places.find((p) => p.id === state.expanded);
+    const standalone = !state.batchMode && expanded && (state.detached || state.view === 'relations' || !selected.some((p) => p.id === expanded.id));
+    if (home && !state.batchMode && state.view === 'cards') body.appendChild(homeBanner(home));
+    if (state.trail.length) body.appendChild(renderBreadcrumbs(expanded));
+    if (standalone) body.appendChild(el('div', { class: 'map-standalone' }, state.editing ? detail(expanded) : reading(expanded)));
+    body.appendChild(resultSummary(d.places.length, selected.length));
     if (!selected.length) {
-      body.appendChild(el('div', { class: 'map-empty', text: '没有符合条件的地点' }));
+      body.appendChild(el('div', { class: 'map-empty', text: t.noResults }));
       return;
     }
     if (state.view === 'relations') {
       renderRelations(selected);
       return;
     }
-    // 「常去」单独提一段（不管 kind），其余按 家 → 周围 分组。
-    // 这只是展示顺序，不是位置关系——这里没有连线。
-    const freq = selected.filter((p) => p.frequent);
-    const rest = selected.filter((p) => !p.frequent);
-    section(t.secFreq, freq);
-    section(t.secHome, rest.filter((p) => p.kind === 'home'));
-    section(t.secAround, rest.filter((p) => p.kind !== 'home' && p.kind !== 'travel'));
-    section(t.secTravel, rest.filter((p) => p.kind === 'travel'));
+    if (state.sort !== 'kind') {
+      section(sortLabel(state.sort), selected, Boolean(standalone));
+      return;
+    }
+    const pinned = selected.filter((p) => state.pinned.includes(p.id));
+    section(language === 'en' ? 'Pinned' : '置顶', pinned, Boolean(standalone));
+    const ordinary = selected.filter((p) => !state.pinned.includes(p.id));
+    const isFrequent = (p) => p.frequent || p.kind === 'frequent';
+    const freq = ordinary.filter(isFrequent);
+    const rest = ordinary.filter((p) => !isFrequent(p));
+    section(t.secFreq, freq, Boolean(standalone));
+    section(t.secHome, rest.filter((p) => p.kind === 'home'), Boolean(standalone));
+    section(t.secAround, rest.filter((p) => p.kind !== 'home' && p.kind !== 'travel'), Boolean(standalone));
+    section(t.secTravel, rest.filter((p) => p.kind === 'travel'), Boolean(standalone));
   }
 
-  function section(title, items) {
+  function section(title, items, standalone) {
     if (!items.length) return;
-    body.appendChild(el('div', { class: 'map-sec', text: title }));
-    body.appendChild(el('div', { class: 'map-grid' }, items.map(cell)));
+    body.appendChild(el('h3', { class: 'map-sec', text: title }));
+    body.appendChild(el('div', { class: 'map-grid' }, items.map((p) => cell(p, !standalone && !state.batchMode && state.expanded === p.id))));
+  }
+
+  const relationAnchors = new Map();
+
+  function relationLink(target, key) {
+    if (!target) return el('span', { class: 'map-dim', text: t.missingTarget });
+    const context = target.terrainLabel || target.kindLabel;
+    const anchor = JSON.stringify(key);
+    const button = el('button', {
+      type: 'button', class: 'map-relation-link', text: target.name,
+      title: `${target.name} · ${context} · ${target.id}`,
+      onclick: () => openPlace(target.id, { detached: true, origin: bookmarkRelation(anchor, button) }),
+    });
+    relationAnchors.set(anchor, button);
+    return button;
   }
 
   function renderRelations(items) {
-    const byId = new Map(state.data.places.map((place) => [place.id, place]));
+    const byId = new Map(state.data.places.map((p) => [p.id, p]));
     const rows = [];
     for (const place of items) {
-      const relations = Array.isArray(place.relations) ? place.relations : [];
-      for (const relation of relations) {
+      for (const relation of place.relations ?? []) {
         const target = byId.get(relation.placeId);
         rows.push(el('div', { class: 'map-relation-row' },
-          el('strong', { text: place.name }),
-          el('span', { text: ' → ' }),
-          el('strong', { text: target?.name ?? t.missingTarget }),
+          relationLink(place, ['list', 'source', place.id, relation.placeId]),
+          el('span', { text: ' → ', 'aria-hidden': 'true' }),
+          relationLink(target, ['list', 'target', place.id, relation.placeId]),
           relation.note ? el('span', { class: 'map-dim', text: `：${relation.note}` }) : null));
       }
     }
     body.appendChild(rows.length ? el('div', { class: 'map-relations-view' }, rows) : el('div', { class: 'map-empty', text: t.noRelations }));
   }
 
-  /** 一格里画卡；展开时它后面紧跟一条详情，并且这一格跨满整行。 */
-  function cell(p) {
-    const open = state.expanded === p.id;
+  function cell(p, open) {
     const wrap = el('div', { class: open ? 'map-cell map-cell-open' : 'map-cell' });
-    wrap.appendChild(card(p));
-    if (open) wrap.appendChild(detail(p));
+    wrap.appendChild(card(p, open));
+    if (open) wrap.appendChild(state.editing ? detail(p) : reading(p));
     return wrap;
   }
 
@@ -1345,84 +2117,142 @@ function mountPlaces(ctx) {
     return `${label}：${status}`;
   }
 
-  function card(p) {
-    const cls = ['map-card'];
+  function card(p, open) {
+    const cls = ['map-card', `map-kind-${p.kind === 'home' ? 'home' : p.frequent ? 'frequent' : p.kind || 'around'}`];
     if (p.kind === 'home') cls.push('map-card-home');
     else if (p.frequent) cls.push('map-card-freq');
-    if (state.expanded === p.id) cls.push('map-card-active');
+    if (!p.hasCover) cls.push('map-card-text');
+    if (open) cls.push('map-card-active');
+    const picked = state.selectedIds.has(p.id);
     if (state.batchMode) {
       cls.push('map-card-select');
-      if (state.selectedIds.has(p.id)) cls.push('map-card-selected');
+      if (picked) cls.push('map-card-selected');
     }
-
-    // 缩略图：缓存里有就同步画，没有就在后面补（不阻塞整面墙渲染）。
-    const url = state.covers.get(p.id);
-    let thumb = null;
-    if (p.hasCover) {
-      thumb = url
-        ? el('img', { class: 'map-thumb', src: url, alt: p.name, loading: 'lazy' })
-        : el('div', { class: 'map-thumb', 'aria-label': t.noImage });
-      if (!url) {
-        void coverOf(p.id).then((u) => {
-          if (!u) return;
-          const img = el('img', { class: 'map-thumb', src: u, alt: p.name, loading: 'lazy' });
-          if (thumb?.parentNode) thumb.parentNode.replaceChild(img, thumb);
-        });
-      }
-    }
-
-    const descCls = p.desc ? 'map-card-desc' : 'map-card-desc map-card-desc-empty';
+    const tags = (p.tags ?? []).slice(0, 2);
     return el('div', {
-      class: cls.join(' '),
-      role: state.batchMode ? 'checkbox' : 'button',
-      'aria-checked': state.batchMode ? (state.selectedIds.has(p.id) ? 'true' : 'false') : null,
-      tabindex: '0',
-      'aria-expanded': state.batchMode ? null : (state.expanded === p.id ? 'true' : 'false'),
-      onclick: () => activateCard(p.id),
+      class: cls.join(' '), role: state.batchMode ? 'checkbox' : 'button', tabindex: '0',
+      'aria-checked': state.batchMode ? String(picked) : null,
+      'aria-expanded': state.batchMode ? null : String(open),
+      onclick: () => activateCard(p.id, open),
       onkeydown: (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Spacebar') {
           ev.preventDefault?.();
-          activateCard(p.id);
+          activateCard(p.id, open);
         }
       },
     },
-    state.batchMode ? el('span', { class: 'map-pick-glyph', text: state.selectedIds.has(p.id) ? '☑' : '☐' }) : null,
-    thumb,
+    state.batchMode ? el('span', { class: 'map-pick-glyph', text: picked ? '☑' : '☐' }) : null,
+    coverOrEmpty(p, 'map-thumb'),
     el('div', { class: 'map-card-body' },
       el('div', { class: 'map-card-head' },
         el('span', { class: 'map-card-name', text: p.name }),
-        el('span', { class: 'map-card-arrow', text: state.expanded === p.id ? '⌃' : '⌄' })),
-      el('div', { class: descCls, text: p.desc || t.noDesc }),
-      el('div', { class: 'map-card-completeness', text: `${t.completeness}：${completeness(p)}` }),
-      el('div', { class: 'map-chips' }, ...(Array.isArray(p.tags) ? p.tags.map((tag) => el('span', { class: 'map-chip', text: tag })) : [])),
-      el('div', { class: 'map-card-foot' },
-        el('span', { class: 'map-chip', text: p.kindLabel }),
-        state.data.homeId === p.id ? el('span', { class: 'map-chip map-chip-on', text: '当前住所' }) : null,
-        p.frequent ? el('span', { class: 'map-chip map-chip-warm', text: '★' }) : null,
-        p.hasCover ? el('span', { class: 'map-chip', text: '📷' }) : null,
-        el('span', { class: 'map-link-status', text: linkStatus(p, 'imggen') }),
-        el('span', { class: 'map-link-status', text: linkStatus(p, 'fun') }),
-        // 只有在「三条全满足」时服务端才给 canMentionImggen=true，面板才显示这个 chip。
-        p.canMentionImggen ? el('span', { class: 'map-chip map-chip-scene', text: `scene：${p.scene}` }) : null)));
+        el('span', { class: 'map-card-arrow', 'aria-hidden': 'true', text: open ? '⌃' : '⌄' })),
+      el('div', { class: 'map-statuses' },
+        el('span', { class: 'map-status map-status-kind', text: p.kindLabel }),
+        state.data.homeId === p.id ? el('span', { class: 'map-status map-status-link', text: t.currentHome }) : null,
+        p.frequent ? el('span', { class: 'map-status', text: '★' }) : null,
+        p.hasCover ? el('span', { class: 'map-status', text: '📷' }) : el('span', { class: 'map-status map-status-warn', text: t.noCoverLabel })),
+      el('div', { class: p.desc ? 'map-card-desc' : 'map-card-desc map-card-desc-empty', text: p.desc || t.noDesc }),
+      tags.length ? el('div', { class: 'map-chips' }, ...tags.map((tag) => el('span', { class: 'map-chip', text: tag }))) : null));
   }
 
-  /** 点卡片：批量模式下是勾选，平时是展开/收起。 */
-  function activateCard(id) {
-    if (state.batchMode) toggleSelect(id);
-    else toggle(id);
+  function focusDetail(selector = '.map-reading h3') {
+    const target = body.querySelector(selector);
+    target?.focus?.({ preventScroll: true });
+    target?.scrollIntoView?.({ block: 'nearest' });
   }
 
-  function toggle(id) {
-    const wasOpen = state.expanded === id;
-    state.expanded = wasOpen ? null : id;
-    renderBody();
-    if (!wasOpen) {
-      const active = body.querySelector('.map-card-active');
-      const target = active?.parentNode ?? active;
-      if (target && typeof target.scrollIntoView === 'function') {
-        target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  function bookmarkRelation(anchor, button) {
+    const scroll = [];
+    const scroller = button.ownerDocument?.scrollingElement;
+    for (let node = button; node; node = node.parentNode ?? node.host) {
+      // 只保留重绘后仍存在的容器。面板正文的子元素会被替换。
+      if (node === body || node === box || node === root || node === scroller || node.contains?.(box)) {
+        if (Number.isFinite(node.scrollTop)) scroll.push({ node, top: node.scrollTop, left: node.scrollLeft });
       }
     }
+    return { id: state.expanded, detached: state.detached, editing: state.editing, anchor, scroll };
+  }
+
+  function openPlace(id, { detached = false, origin = null } = {}) {
+    state.trail = origin ? [...state.trail, origin] : [];
+    state.expanded = id;
+    state.detached = detached;
+    state.editing = false;
+    touchRecent('recentViewed', id);
+    renderBody();
+    focusDetail();
+  }
+
+  function backPlace() {
+    const previous = state.trail.pop();
+    if (!previous) { closePlace(); return; }
+    state.expanded = state.data.places.some((p) => p.id === previous.id) ? previous.id : null;
+    state.detached = previous.detached;
+    state.editing = Boolean(state.expanded && previous.editing);
+    renderBody();
+    const anchor = relationAnchors.get(previous.anchor);
+    if (!anchor) { focusDetail(); return; }
+    anchor.focus?.({ preventScroll: true });
+    for (const { node, top, left } of previous.scroll) {
+      node.scrollTop = top;
+      if (Number.isFinite(left)) node.scrollLeft = left;
+    }
+    if (!previous.scroll.length) anchor.scrollIntoView?.({ block: 'nearest' });
+  }
+
+  function closePlace() {
+    state.expanded = null;
+    state.editing = false;
+    state.detached = false;
+    state.trail = [];
+    renderBody();
+  }
+
+  function activateCard(id, open) {
+    if (state.batchMode) toggleSelect(id);
+    else if (open) closePlace();
+    else openPlace(id);
+  }
+
+  function reading(p) {
+    const relationRows = (relations, direction) => relations.map(({ place, note }) =>
+      el('div', { class: 'map-relation-row' },
+        relationLink(place, ['reading', direction, p.id, place?.id]),
+        note ? el('span', { text: note }) : null));
+    const byId = new Map(state.data.places.map((place) => [place.id, place]));
+    const relations = relationRows((p.relations ?? []).map((relation) => ({
+      place: byId.get(relation.placeId), note: relation.note,
+    })), 'outgoing');
+    const mentions = relationRows(state.data.places.flatMap((place) => (place.relations ?? [])
+      .filter((relation) => relation.placeId === p.id).map(({ note }) => ({ place, note }))), 'incoming');
+    const mentionLabel = language === 'en' ? 'Mentioned by' : '被哪些地点提到';
+    const heading = `${p.name}${p.terrainLabel ? ` · ${p.terrainLabel}` : ''}`;
+    return el('article', { class: 'map-reading' },
+      el('div', { class: 'map-detail-top' },
+        el('h3', { text: heading, tabindex: '-1' }),
+        el('div', { class: 'map-reading-actions' },
+          el('button', { type: 'button', text: state.pinned.includes(p.id) ? (language === 'en' ? 'Unpin' : '取消置顶') : (language === 'en' ? 'Pin for browsing' : '置顶浏览'),
+            onclick: () => { state.pinned = state.pinned.includes(p.id) ? state.pinned.filter((id) => id !== p.id) : [p.id, ...state.pinned]; persistPrefs(); renderBody(); } }),
+          state.trail.length ? el('button', { type: 'button', text: t.backPlace, onclick: backPlace }) : null,
+          el('button', { type: 'button', text: t.edit, onclick: () => { state.editing = true; renderBody(); focusDetail('.map-edit-heading'); } }),
+          el('button', { type: 'button', text: t.close, onclick: closePlace }))),
+      originalCover(p),
+      el('p', { class: 'map-reading-text', text: p.desc || t.noDesc }),
+      (p.effectiveStyle || p.style) ? el('p', { class: 'map-note' }, el('strong', { text: t.detailStyle }), ' · ', p.effectiveStyle || p.style) : null,
+      p.tags?.length ? el('div', { class: 'map-chips' }, ...p.tags.map((tag) => el('span', { class: 'map-chip', text: tag }))) : null,
+      relations.length ? el('section', { 'aria-label': t.relationLabel }, el('h4', { class: 'map-sec', text: t.relationLabel }), ...relations) : null,
+      mentions.length ? el('section', { 'aria-label': mentionLabel }, el('h4', { class: 'map-sec', text: mentionLabel }), ...mentions) : null,
+      el('details', { class: 'map-note' },
+        el('summary', { text: t.options }),
+        el('div', { class: 'map-statuses' },
+          el('span', { class: 'map-status map-status-kind', text: `${t.completeness}：${completeness(p)}` }),
+          el('span', { class: 'map-status', text: linkStatus(p, 'imggen') }),
+          el('span', { class: 'map-status', text: linkStatus(p, 'fun') })),
+        p.canMentionImggen ? el('div', { class: 'map-chip-scene', text: `scene：${p.scene}` }) : null,
+        p.canMentionFun ? el('div', { text: language === 'en'
+          ? `fun_go: ${p.funVenue} (a similar venue in Fun time)`
+          : `fun_go 填「${p.funVenue}」（娱乐时间里最接近这处的一处）` }) : null));
   }
 
   function detail(p) {
@@ -1466,7 +2296,10 @@ function mountPlaces(ctx) {
     const addRelation = el('button', { type: 'button', text: '添加关联', onclick: () => { if (relationRows.length >= 8) return; relationRows.push({ placeId: '', note: '' }); redrawRelations(); captureDraft(p.id); } });
     redrawRelations();
 
-    if (!state.baseRevisions.has(p.id) || !state.drafts.has(p.id)) state.baseRevisions.set(p.id, p.revision);
+    if (!state.baseValues.has(p.id) || (!state.drafts.has(p.id) && !state.conflicts.has(p.id))) {
+      state.baseRevisions.set(p.id, p.revision);
+      state.baseValues.set(p.id, placeEditValues(p));
+    }
     bindDraft(p.id, { name: nameIn, desc: descIn, style: styleIn, aliases: aliasIn, tags: tagsIn, kind: kindSel, scene: sceneIn, funVenue: funIn, relationsJson });
     try {
       const savedRelations = JSON.parse(relationsJson.value || '[]');
@@ -1480,12 +2313,13 @@ function mountPlaces(ctx) {
       class: 'map-btn-primary',
       type: 'button',
       text: t.save,
+      disabled: state.pending.has(`edit:${p.id}`) || state.conflicts.has(p.id),
       onclick: async () => {
-        if (saveBtn.disabled) return;
+        if (saveBtn.disabled || state.pending.has(`edit:${p.id}`) || state.conflicts.has(p.id)) return;
         saveBtn.disabled = true;
         saveBtn.textContent = t.busy;
         try {
-          const submitted = formValues(p.id);
+          let submitted = formValues(p.id);
           let relations;
           try { relations = JSON.parse(submitted.relationsJson || '[]'); } catch { relations = null; }
           const seenTargets = new Set();
@@ -1501,28 +2335,34 @@ function mountPlaces(ctx) {
             render();
             return;
           }
-          await call('edit', [{
-            id: p.id,
-            expectedRevision: state.baseRevisions.get(p.id),
-            name: String(nameIn.value ?? '').trim(),
-            desc: descIn.value,
-            style: String(styleIn.value ?? '').trim(),
-            aliases: String(aliasIn.value ?? '').split(/[、,，]/).map((x) => x.trim()).filter(Boolean),
-            tags: String(tagsIn.value ?? '').split(/[、,，]/).map((x) => x.trim()).filter(Boolean),
-            kind: kindSel.value,
-            scene: String(sceneIn.value ?? '').trim(),
-            funVenue: String(funIn.value ?? '').trim(),
-            relations,
-          }]);
+          for (let attempt = 0; ; ++attempt) {
+            try {
+              await call('edit', [editPayload(p.id, submitted)]);
+              break;
+            } catch (err) {
+              if (!err.conflict || !err.current) throw err;
+              const merged = mergeEditConflict(p.id, err.current);
+              submitted = merged.values;
+              if (merged.fields.length || attempt >= 1) {
+                setMessage(merged.fields.length
+                  ? (language === 'en' ? 'Choose a value for each conflicting field before saving.' : '请为每个冲突字段选择要保留的内容，再保存。')
+                  : (language === 'en' ? 'Newer changes were merged into your draft. Please save again.' : '最新改动已合并到草稿，请再保存一次。'), false);
+                render();
+                return;
+              }
+              // One guarded retry handles disjoint/same-value edits without asking for choices.
+              render();
+            }
+          }
           clearSavedDraft(p.id, submitted);
           state.conflicts.delete(p.id);
           state.baseRevisions.delete(p.id);
+          state.baseValues.delete(p.id);
           forms.delete(p.id);
           state.covers.delete(p.id);
           setMessage(t.saved, true);
           await load();
         } catch (err) {
-          if (err.conflict && err.current) state.conflicts.set(p.id, err.current);
           setMessage(String(err?.message ?? err), false);
           saveBtn.disabled = false;
           saveBtn.textContent = t.save;
@@ -1624,44 +2464,39 @@ function mountPlaces(ctx) {
       }),
       fileInput);
 
-    return el('div', { class: 'map-detail' },
-      el('div', { class: 'map-detail-top' }, el('h4', { text: `${p.name}${p.terrain ? ` · ${p.terrain}` : ''}` }),
-        el('button', {
-          type: 'button',
-          class: 'map-dim',
-          text: '×',
-          title: '收起',
-          onclick: (ev) => {
-            ev?.stopPropagation?.();
-            state.expanded = null;
-            renderBody();
-          },
-        })),
-      state.conflicts.has(p.id) ? el('div', { class: 'map-msg map-msg-bad' },
-        el('div', { text: `当前已保存内容：${state.conflicts.get(p.id).desc || '（无描写）'}。你的草稿仍保留。` }),
-        el('button', { type: 'button', text: '载入当前版本', onclick: () => { forms.delete(p.id); state.drafts.delete(p.id); state.conflicts.delete(p.id); state.baseRevisions.delete(p.id); persistDrafts(); void load(); } }),
-        el('button', { type: 'button', text: '保留草稿，确认覆盖', onclick: () => { state.baseRevisions.set(p.id, state.conflicts.get(p.id).revision); state.conflicts.delete(p.id); setMessage('已确认保留草稿，请再点保存；若记录再次变化会重新提示冲突。'); render(); } })) : null,
+    return el('div', { class: 'map-detail map-zone-edit' },
+      el('div', { class: 'map-detail-top' },
+        el('h4', { class: 'map-edit-heading', tabindex: '-1', text: `${p.name}${p.terrainLabel ? ` · ${p.terrainLabel}` : ''}` }),
+        el('button', { type: 'button', text: t.read, onclick: () => { state.editing = false; renderBody(); focusDetail(); } })),
+      editConflictPanel(p.id),
       el('div', { class: 'map-field' }, el('label', { text: '名字' }), nameIn),
       el('div', { class: 'map-field-row' },
         el('div', { class: 'map-field' }, el('label', { text: '归类' }), kindSel)),
       p.kind === 'home' ? el('div', { class: 'map-actions' }, el('span', { text: state.data.homeId === p.id ? '当前住所' : '住所候选' }), el('button', { type: 'button', text: state.data.homeId === p.id ? '当前住所' : '设为当前住所', onclick: async () => { const r = await call('setHome', [{ id: p.id }]); if (r.ok) await load(); } })) : null,
       el('div', { class: 'map-field' }, el('label', { text: t.detailDesc }), descIn),
-      el('div', { class: 'map-field' }, el('label', { text: t.detailStyle }), styleIn),
-      el('div', { class: 'map-field' }, el('label', { text: t.detailAliases }), aliasIn),
       el('div', { class: 'map-field' }, el('label', { text: t.detailTags }), tagsIn),
-      el('div', { class: 'map-field' }, el('label', { text: t.detailScene }), sceneIn),
-      // 三条全满足才提示 scene；否则明说「不用填」——不指向不存在的库。
-      el('div', { class: 'map-scene' },
-        p.canMentionImggen
+      el('div', { class: 'map-field' }, el('label', { text: t.relationLabel }), el('div', { class: 'map-note', text: '只写语境，不写方位或远近。' }), relationsJson, relationList, addRelation),
+      el('details', {
+        class: 'map-edit-options', open: state.openOptions.has(p.id),
+        ontoggle: (event) => {
+          const options = event.currentTarget;
+          if (!options.isConnected) return;
+          if (options.open) state.openOptions.add(p.id);
+          else state.openOptions.delete(p.id);
+        },
+      },
+        el('summary', { text: language === 'en' ? 'Style, aliases and links' : '画风、别名和联动' }),
+        el('div', { class: 'map-field' }, el('label', { text: t.detailStyle }), styleIn),
+        el('div', { class: 'map-field' }, el('label', { text: t.detailAliases }), aliasIn),
+        el('div', { class: 'map-field' }, el('label', { text: t.detailScene }), sceneIn),
+        el('div', { class: 'map-scene' }, p.canMentionImggen
           ? el('span', {}, '生图时 ', el('b', { text: `scene 填「${p.scene}」` }))
           : el('span', { text: linkStatus(p, 'imggen') })),
-      el('div', { class: 'map-field' }, el('label', { text: t.detailFunVenue }), funIn),
-      el('div', { class: 'map-field' }, el('label', { text: '地点关联' }), el('div', { class: 'map-note', text: '只写语境，不写方位或远近。' }), relationsJson, relationList, addRelation),
-      // 旅游那类才有意义：三条全满足才提「想去逛去哪」。
-      el('div', { class: 'map-scene' },
-          p.canMentionFun
-            ? el('span', {}, '想真去逛：', el('b', { text: `fun_go 填「${p.funVenue}」` }), '（娱乐时间里最接近这处的一处，不是同一个地方）')
-            : el('span', { text: linkStatus(p, 'fun') })),
+        el('div', { class: 'map-field' }, el('label', { text: t.detailFunVenue }), funIn),
+        el('div', { class: 'map-scene' }, p.canMentionFun
+          ? el('span', {}, '想真去逛：', el('b', { text: `fun_go 填「${p.funVenue}」` }), '（娱乐时间里最接近这处的一处，不是同一个地方）')
+          : el('span', { text: linkStatus(p, 'fun') }))),
+      p.hasCover ? coverFocusSettings(p) : null,
       p.hasCover ? el('div', { class: 'map-locked', text: '有图就锁着，不会自己变；要换先清空。' }) : null,
       actions);
   }
@@ -1709,6 +2544,11 @@ function mountPlaces(ctx) {
       const d = await call('list');
       if (version !== state.loadVersion || ctx.signal?.aborted || state.pending.size) return;
       state.data = d;
+      if (!state.prefsLoaded) await loadPrefs();
+      if (version !== state.loadVersion || ctx.signal?.aborted) return;
+      const validIds = new Set(d.places.map((place) => place.id));
+      state.recentViewed = state.recentViewed.filter((id) => validIds.has(id));
+      state.recentEdited = state.recentEdited.filter((id) => validIds.has(id));
       // 撤销牌以服务端为准：过期了、被新的删除替换了，都从 `list` 里读回来。
       state.undo = d.undo ?? null;
       scheduleUndoClear();
@@ -1757,7 +2597,10 @@ function mountPlaces(ctx) {
   // 地点是主人手改的，不会自己变；一分钟刷一次足够，也不会打断正在填的字。
   // `ctx.interval` 可选：老宿主没有这个方法（feed-world 也是这么防的），
   // 没有就不自动刷——面板本身照样能手动用，不该因为少一个方法就整片白。
-  ctx.interval?.(() => { void load(); }, 60000);
+  ctx.interval?.(() => {
+    if (body.querySelector('.map-original[open]') || body.querySelector('.map-focus-settings[open]')) return;
+    void load();
+  }, 60000);
 
   return { refresh: load };
 }

@@ -158,4 +158,67 @@ test('merge fills cover and relations to local-only targets without touching unr
   assert.deepEqual(result.summary.updated, ['one']);
 });
 
+test('coverFocus export/import roundtrip and old backups remain compatible', async () => {
+  const focused = { ...place('crop', '图片', 'crop.png'), coverFocus: { x: 12.5, y: 99 }, modifiedAt: 123.5 };
+  const bundle = await buildExport(stateWith(focused), async () => dataUrl);
+  assert.deepEqual(bundle.state.places[0].coverFocus, focused.coverFocus);
+  assert.equal(bundle.state.places[0].modifiedAt, 123.5);
+  const imported = prepareImport(newState(), JSON.parse(JSON.stringify(bundle)));
+  assert.deepEqual(imported.state.places[0].coverFocus, focused.coverFocus);
+  assert.equal(imported.state.places[0].modifiedAt, 123.5);
+  const again = await buildExport(imported.state, async () => dataUrl);
+  assert.deepEqual(again.state.places[0].coverFocus, focused.coverFocus);
+  assert.equal(again.state.places[0].modifiedAt, 123.5);
+  delete bundle.state.places[0].coverFocus;
+  delete bundle.state.places[0].modifiedAt;
+  const old = prepareImport(newState(), bundle);
+  assert.equal(Object.hasOwn(old.state.places[0], 'coverFocus'), false);
+  assert.equal(old.state.places[0].modifiedAt, 0);
+});
+
+test('imports preserve local modification times while new backup places retain theirs', () => {
+  const local = { ...place('shared', '地点'), modifiedAt: 900 };
+  const older = { ...place('shared', '地点'), desc: '备份描写', modifiedAt: 100 };
+  const incomingNew = { ...place('new-place', '新地点'), modifiedAt: 200 };
+  const bundle = { format: 'little-world', version: 1, state: stateWith(older, incomingNew), covers: {} };
+  const merged = prepareImport(stateWith({ ...local, desc: '' }), bundle, { mode: 'merge' });
+  assert.equal(merged.state.places.find((p) => p.id === local.id).modifiedAt, 900);
+  assert.equal(merged.state.places.find((p) => p.id === local.id).desc, '备份描写');
+  const overwritten = prepareImport(stateWith(local), bundle, { mode: 'overwrite' });
+  assert.equal(overwritten.state.places.find((p) => p.id === local.id).modifiedAt, 900);
+  assert.equal(overwritten.state.places.find((p) => p.id === 'new-place').modifiedAt, 200);
+  const legacy = { ...older };
+  delete legacy.modifiedAt;
+  const legacyOverwrite = prepareImport(stateWith(local), { ...bundle, state: stateWith(legacy) }, { mode: 'overwrite' });
+  assert.equal(legacyOverwrite.state.places[0].modifiedAt, 900);
+});
+
+test('merge adopts imported crop only with its cover; overwrite never retains unrelated crop', () => {
+  const local = { ...place('shared', '地点', 'local.png'), coverFocus: { x: 5, y: 10 } };
+  const incoming = { ...place('shared', '地点', 'incoming.png'), coverFocus: { x: 70, y: 90 } };
+  const bundle = { format: 'little-world', version: 1, state: stateWith(incoming), covers: { 'incoming.png': dataUrl } };
+  for (const focus of [local.coverFocus, undefined]) {
+    const current = stateWith({ ...local, coverFocus: focus });
+    const result = prepareImport(current, bundle, { mode: 'merge' });
+    assert.equal(result.state.places[0].cover, local.cover);
+    assert.deepEqual(result.state.places[0].coverFocus, focus);
+    assert.equal(result.images.length, 0);
+    assert.deepEqual(current.places[0].coverFocus, focus);
+  }
+  const filled = prepareImport(stateWith({ ...local, cover: '' }), bundle, { mode: 'merge' });
+  assert.deepEqual(filled.state.places[0].coverFocus, incoming.coverFocus);
+  assert.equal(filled.images.length, 1);
+  assert.deepEqual(filled.items[0].changes.find((c) => c.field === 'coverFocus').result, incoming.coverFocus);
+  const overwritten = prepareImport(stateWith(local), bundle, { mode: 'overwrite' });
+  assert.deepEqual(overwritten.state.places[0].coverFocus, incoming.coverFocus);
+  delete incoming.coverFocus;
+  for (const mode of ['merge', 'overwrite']) {
+    const current = stateWith({ ...local, cover: mode === 'merge' ? '' : local.cover });
+    assert.equal(Object.hasOwn(prepareImport(current, bundle, { mode }).state.places[0], 'coverFocus'), false);
+  }
+  incoming.cover = '';
+  incoming.coverFocus = { x: 99, y: 99 };
+  assert.equal(Object.hasOwn(prepareImport(stateWith(local), bundle, { mode: 'overwrite' }).state.places[0], 'coverFocus'), false);
+});
+
 await report();

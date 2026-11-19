@@ -7,12 +7,12 @@
  * {
  *   version: 1,
  *   terrain: 'forest',            // 当前地形 id（'' = 还没选）
- *   places: [place...],           // 每条的字段严格照 places.normalizePlace
+ *   places: [place...],           // 每条的字段严格照 places.normalizePlace（含可选 modifiedAt）
  *   updatedAt: 0,                 // ms
  * }
  *
- * **没有路线、没有坐标、没有距离**：这里连一个数字字段都不该出现（`updatedAt` 除外，
- * 它是时间戳不是坐标）。`test/places.test.mjs` 有一条守门断言钉这件事。
+ * place.modifiedAt 是可选的非负毫秒时间戳；旧 v1 记录归一后按 0 处理。版本号仍为 1。
+ * **没有路线、没有坐标、没有距离**：数字字段只有时间戳（`updatedAt` / `modifiedAt`），不表示地理位置。`test/places.test.mjs` 有守门断言钉住这件事。
  *
  * **「有 cover 就锁死」在这里落成两件事**：
  *   1. `setCover()` 是唯一能改 `cover` 的入口——没有别的地方会自己写它；
@@ -21,7 +21,7 @@
  */
 
 import {
-  KINDS, findPlaceCandidates, hasFunVenue, hasScene, normalizeKind, normalizePlace, slugFor, terrainPlaces,
+  KINDS, findPlaceCandidates, hasFunVenue, hasScene, normalizeCoverFocus, normalizeKind, normalizeModifiedAt, normalizePlace, slugFor, terrainPlaces,
 } from './places.js';
 
 export const STATE_VERSION = 1;
@@ -32,6 +32,10 @@ export const MAX_ALIASES = 8;
 export const MAX_PLACES = 60;
 
 const text = (v, max) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '');
+
+function touchPlace(place, nowMs) {
+  place.modifiedAt = normalizeModifiedAt(nowMs);
+}
 
 /** 空状态。 */
 export function newState() {
@@ -139,6 +143,7 @@ export function addPlace(state, input = {}, nowMs = 0) {
     terrain: text(input.terrain, 20) || state.terrain,
   });
   if (!place) return { place: null, error: '这处地方没建起来' };
+  touchPlace(place, nowMs);
   state.places.push(place);
   state.updatedAt = Number(nowMs) || 0;
   return { place, error: '' };
@@ -171,7 +176,7 @@ export function editPlace(state, id, patch = {}, nowMs = 0) {
   }
   if (patch.aliases !== undefined) {
     const aliases = normalizePlace({ ...place, aliases: patch.aliases }).aliases;
-    setIf('aliases', aliases);
+    if (JSON.stringify(place.aliases ?? []) !== JSON.stringify(aliases)) setIf('aliases', aliases);
   }
   if (patch.tags !== undefined) {
     const tags = normalizePlace({ ...place, tags: patch.tags }).tags;
@@ -193,6 +198,7 @@ export function editPlace(state, id, patch = {}, nowMs = 0) {
       changed.push('relations');
     }
   }
+  if (changed.length) touchPlace(place, nowMs);
   state.updatedAt = Number(nowMs) || 0;
   return { place, changed, error: '' };
 }
@@ -211,15 +217,41 @@ export function setCover(state, id, filename, nowMs = 0) {
   if (!place) return { place: null, cover: '', cleared: false, error: `没有这一处（${text(id, 40) || '空'}）` };
   const want = text(filename, 160);
   if (!want) {
-    place.cover = '';
-    state.updatedAt = Number(nowMs) || 0;
+    if (place.cover || place.coverFocus) {
+      place.cover = '';
+      delete place.coverFocus;
+      touchPlace(place, nowMs);
+      state.updatedAt = Number(nowMs) || 0;
+    }
     return { place, cover: '', cleared: true, error: '' };
   }
   const safe = normalizePlace({ ...place, cover: want }).cover;
   if (!safe) return { place, cover: place.cover, cleared: false, error: '这个文件名不能用（只收字母、数字、点、短横和下划线）' };
-  place.cover = safe;
-  state.updatedAt = Number(nowMs) || 0;
+  if (place.cover !== safe || place.coverFocus) {
+    place.cover = safe;
+    delete place.coverFocus;
+    touchPlace(place, nowMs);
+    state.updatedAt = Number(nowMs) || 0;
+  }
   return { place, cover: safe, cleared: false, error: '' };
+}
+
+/** Set the crop anchor for the currently attached cover only. */
+export function setCoverFocus(state, id, focus, nowMs = 0) {
+  const place = placeById(state, id);
+  if (!place) return { place: null, changed: false, error: `没有这一处（${text(id, 40) || '空'}）` };
+  if (!place.cover) return { place, changed: false, error: '这处还没有图片' };
+  const next = normalizeCoverFocus(focus);
+  if (!next) return { place, changed: false, error: '图片焦点 x、y 必须是 0 到 100 的有限数字' };
+  const previous = place.coverFocus ?? { x: 50, y: 50 };
+  const changed = previous.x !== next.x || previous.y !== next.y;
+  if (changed) {
+    if (next.x === 50 && next.y === 50) delete place.coverFocus;
+    else place.coverFocus = next;
+    touchPlace(place, nowMs);
+    state.updatedAt = Number(nowMs) || 0;
+  }
+  return { place, changed, error: '' };
 }
 
 /** 删掉一处地点。返回 `{ removed, error }`。 */
@@ -227,7 +259,14 @@ export function removePlace(state, id, nowMs = 0) {
   const place = placeById(state, id);
   if (!place) return { removed: null, error: `没有这一处（${text(id, 40) || '空'}）` };
   state.places = state.places.filter((p) => p !== place);
-  for (const remaining of state.places) remaining.relations = (remaining.relations ?? []).filter((relation) => relation.placeId !== place.id);
+  for (const remaining of state.places) {
+    const relations = remaining.relations ?? [];
+    const kept = relations.filter((relation) => relation.placeId !== place.id);
+    if (kept.length !== relations.length) {
+      remaining.relations = kept;
+      touchPlace(remaining, nowMs);
+    }
+  }
   if (state.homeId === place.id) state.homeId = '';
   state.updatedAt = Number(nowMs) || 0;
   return { removed: place, error: '' };
@@ -286,6 +325,7 @@ export function applyTerrainSelection(state, terrainId, wantedIds = null, nowMs 
       error: `地点最多 ${MAX_PLACES} 处，当前已有 ${state.places.length} 处，剩余 ${available} 处容量；本次需新增 ${added.length} 处，整次未添加，请减少勾选或先删除地点`,
     };
   }
+  for (const place of added) touchPlace(place, nowMs);
   state.places.push(...added);
   // 一条都没选（勾选表被全不选）时不动地形——「我还没决定」不等于「我选了这套」。
   if (added.length || !wanted || wanted.size) {
@@ -324,12 +364,14 @@ export function placeView(place, state) {
     desc: place.desc,
     style: place.style,
     cover: place.cover,
+    ...(place.cover && place.coverFocus ? { coverFocus: { ...place.coverFocus } } : {}),
     hasCover: Boolean(place.cover),
     scene: place.scene,
     hasScene: hasScene(place),
     funVenue: place.funVenue ?? '',
     hasFunVenue: hasFunVenue(place),
     frequent: place.frequent,
+    modifiedAt: normalizeModifiedAt(place.modifiedAt),
     terrain: place.terrain,
     tags: [...(place.tags ?? [])],
     completeness: placeCompleteness(place, state),

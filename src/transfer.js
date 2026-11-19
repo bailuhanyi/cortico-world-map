@@ -72,6 +72,8 @@ function mergeLocalFirst(current, incoming, raw, conflicts) {
   }
   if (Object.hasOwn(raw, 'cover') && isBlank(current.cover) && !isBlank(incoming.cover)) {
     merged.cover = incoming.cover;
+    if (incoming.coverFocus) merged.coverFocus = { ...incoming.coverFocus };
+    else delete merged.coverFocus;
     filled.push('cover');
   }
   return { merged, filled };
@@ -142,7 +144,7 @@ function parseDecisions(decisions) {
 
 const ITEM_MODES = ['skip', 'merge', 'overwrite'];
 /** 面板逐项差异要展示的字段（顺序固定，面板按它铺行）。 */
-const ITEM_FIELDS = ['name', 'aliases', 'tags', 'kind', 'desc', 'style', 'scene', 'funVenue', 'terrain', 'relations', 'frequent', 'cover'];
+const ITEM_FIELDS = ['name', 'aliases', 'tags', 'kind', 'desc', 'style', 'scene', 'funVenue', 'terrain', 'relations', 'frequent', 'cover', 'coverFocus'];
 
 function itemOf(place, local, result, action, mode, conflicts, raw) {
   const changes = ITEM_FIELDS.map((field) => {
@@ -257,6 +259,8 @@ export function prepareImport(current, input, { mode = 'skip', decisions } = {})
           updated.push(place.id);
           action = 'updated';
           existingNames.delete(result.places[existingIndex].name);
+          const localModifiedAt = result.places[existingIndex].modifiedAt;
+          if (Number.isFinite(localModifiedAt) && localModifiedAt >= 0) place.modifiedAt = localModifiedAt;
           result.places[existingIndex] = place;
         } else {
           added.push(place.id);

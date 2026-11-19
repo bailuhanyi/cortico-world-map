@@ -27,6 +27,10 @@ import { mkdir, readFile, readdir, rename, stat, unlink, writeFile } from 'node:
 import { dirname, join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { buildExport, prepareImport } from './transfer.js';
+import {
+  archiveCoverResources, inspectCoverResources, listCoverArchives, restoreCoverResources,
+} from './cover-resources.js';
+import { readPanelPrefs, writePanelPrefs } from './panel-prefs.js';
 import { fileURLToPath } from 'node:url';
 
 import { DEFAULTS, ID, configGroup, panelText, text } from './config.js';
@@ -36,13 +40,37 @@ import {
 import {
   MAX_ALIASES, addPlace, applyTerrain, applyTerrainSelection, editPlace, kindLabelOf, listPlaces,
   newState, normalizeKind, normalizeState, placeById, placeView, removePlace, resolvePlace, resolvePlaceCandidates,
-  setCover, summaryOf,
+  setCover, setCoverFocus, summaryOf,
 } from './state.js';
 
 const ENV_PROMPT = fileURLToPath(new URL('./ENV_PROMPT.md', import.meta.url));
 
 const msg = (err) => (err instanceof Error ? err.message : String(err));
-const revisionOf = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const revisionOf = (value) => createHash('sha256').update(JSON.stringify(value, (key, item) => (
+  key === 'modifiedAt' && item === 0 ? undefined : item
+))).digest('hex');
+
+const DRAFT_LIMITS = { name: 40, desc: 400, style: 160, aliases: 300, kind: 20, scene: 40, funVenue: 40, tags: 240, relationsJson: 1600 };
+const cleanDraftFields = (input) => Object.fromEntries(Object.entries(DRAFT_LIMITS)
+  .filter(([key]) => typeof input?.[key] === 'string')
+  .map(([key, limit]) => [key, input[key].slice(0, limit)]));
+
+function normalizeDrafts(drafts) {
+  if (!Array.isArray(drafts) || drafts.length > 61) throw new Error('草稿数量无效');
+  const clean = new Map();
+  for (const entry of drafts) {
+    if (!entry || typeof entry.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(entry.id) || entry.id.includes('..')) continue;
+    const fields = cleanDraftFields(entry.fields);
+    if (!Object.keys(fields).length) continue;
+    const base = entry.base;
+    const validBase = base && typeof base.revision === 'string' && /^[a-f0-9]{64}$/.test(base.revision)
+      && base.fields && typeof base.fields === 'object' && !Array.isArray(base.fields);
+    clean.set(entry.id, { fields, ...(validBase ? { base: { revision: base.revision, fields: cleanDraftFields(base.fields) } } : {}) });
+  }
+  return clean;
+}
+
+const draftEntries = (drafts) => [...drafts].map(([id, entry]) => ({ id, ...entry }));
 
 /**
  * 删除后能撤销的时限（毫秒）。
@@ -893,7 +921,9 @@ export class MapWorld {
     if (decoded.error) return { ok: false, error: decoded.error };
     const dir = this.coversDir();
     await mkdir(dir, { recursive: true });
-    const file = `${placeId}.${decoded.ext}`;
+    // Different image bytes must invalidate stale crop saves, including same-extension uploads.
+    const digest = createHash('sha256').update(decoded.bytes).digest('hex').slice(0, 12);
+    const file = `${placeId}.${digest}.${decoded.ext}`;
     const target = join(dir, file);
     const tmp = `${target}.tmp`;
     await writeFile(tmp, decoded.bytes);
@@ -901,12 +931,8 @@ export class MapWorld {
     const { cover, error } = setCover(this.#state, placeId, file, this.#now());
     if (error) return { ok: false, error };
     await this.#save();
-    // 新图和引用都保存成功后才清理旧扩展名，写入失败时保留原图。
-    try {
-      for (const n of await readdir(dir)) {
-        if (n.startsWith(`${placeId}.`) && n !== file) await unlink(join(dir, n)).catch(() => {});
-      }
-    } catch { /* 清理不影响已保存的新图 */ }
+    // Older immutable cover files may still be referenced by state.json.bak,
+    // import recovery, or undo snapshots; keep them available for restoration.
     return { ok: true, cover, mime: decoded.mime, bytes: decoded.bytes.length };
   }
 
@@ -1038,7 +1064,7 @@ export class MapWorld {
         { label: t.badgeCover, value: `${s.withCover}/${s.total}`, tone: s.withCover ? 'plain' : 'off' },
       ],
       panels: [
-        { id: 'places', title: p.places.title, description: p.places.description, getMethods: ['list', 'cover', 'drafts', 'export'] },
+        { id: 'places', title: p.places.title, description: p.places.description, getMethods: ['list', 'cover', 'drafts', 'export', 'inspectCovers', 'listCoverArchives', 'getPanelPrefs'] },
       ],
       invoke: (panel, method, args) => this.#serial(() => this.#invoke(panel, method, args ?? [])),
       config: [configGroup(this.language)],
@@ -1063,7 +1089,7 @@ export class MapWorld {
           const terrain = findTerrain(cur.terrain);
           return `${sum.total} 处地方（${terrain ? terrain.label : '没选地形'}）· ${sum.withCover} 处有图`;
         },
-        clear: () => this.#clearState(),
+        clear: () => this.#serial(() => this.#clearState()),
       }],
     };
   }
@@ -1085,12 +1111,24 @@ export class MapWorld {
       await this.#refreshInstalled();
       if (panel !== 'places') throw new Error(`不认识的面板：${panel}`);
       const a = Array.isArray(args) ? (args[0] ?? {}) : (args ?? {});
-      if (!['list', 'cover', 'drafts', 'saveDrafts', 'export', 'previewImport', 'recoveryInfo', 'previewRestore'].includes(method)) this.#ensureWritable();
+      if (!['list', 'cover', 'drafts', 'saveDrafts', 'export', 'previewImport', 'recoveryInfo', 'previewRestore',
+        'inspectCovers', 'listCoverArchives', 'getPanelPrefs', 'savePanelPrefs'].includes(method)) this.#ensureWritable();
       switch (method) {
         case 'list': return this.#listData();
+        case 'inspectCovers': return await inspectCoverResources(dirname(this.stateFile()), {
+          current: this.#state, saved: this.#lastSaved, undo: this.#undo?.before,
+        });
+        case 'listCoverArchives': return await listCoverArchives(dirname(this.stateFile()));
+        case 'getPanelPrefs': return { ok: true, prefs: await readPanelPrefs(join(dirname(this.stateFile()), 'views.json')) };
+        case 'archiveCovers': return await archiveCoverResources(dirname(this.stateFile()), {
+          current: this.#state, saved: this.#lastSaved, undo: this.#undo?.before,
+        }, { filenames: a.filenames, expectedRevision: a.expectedRevision, now: this.#now() });
+        case 'restoreCoverArchive': return await restoreCoverResources(dirname(this.stateFile()), String(a.id ?? ''));
+        case 'savePanelPrefs': return { ok: true, prefs: await writePanelPrefs(join(dirname(this.stateFile()), 'views.json'), a.prefs) };
         case 'cover': return await this.#readCover(String(a.id ?? ''));
         case 'upload': return await this.#uploadFromPanel(String(a.id ?? ''), a.data);
         case 'clearCover': return await this.#panelClearCover(String(a.id ?? ''));
+        case 'coverFocus': return await this.#panelCoverFocus(a);
         case 'add': return await this.#panelAdd(a);
         case 'edit': return await this.#panelEdit(a);
         case 'remove': return await this.#panelRemove(String(a.id ?? ''));
@@ -1099,7 +1137,7 @@ export class MapWorld {
         case 'frequent': return await this.#panelFrequent(String(a.id ?? ''), a.on === true);
         case 'terrain': return await this.#panelTerrain(a);
         case 'setHome': return await this.#setHome(String(a.id ?? ''));
-        case 'drafts': return { ok: true, drafts: [...this.#drafts].map(([id, fields]) => ({ id, fields })) };
+        case 'drafts': return { ok: true, drafts: structuredClone(draftEntries(this.#drafts)) };
         case 'saveDrafts': return await this.#saveDrafts(a.drafts);
         case 'export': return { ok: true, bundle: await buildExport(this.#state, (_filename, place) => this.#readCover(place.id)) };
         case 'previewImport': {
@@ -1115,7 +1153,7 @@ export class MapWorld {
         case 'recoveryInfo': return await this.#recoveryInfo();
         case 'previewRestore': return await this.#previewRestore();
         case 'restore': return await this.#restore(a);
-        case 'removeDraft': return await this.#saveDrafts([...this.#drafts].filter(([id]) => id !== String(a.id ?? '')).map(([id, fields]) => ({ id, fields })));
+        case 'removeDraft': return await this.#saveDrafts(draftEntries(this.#drafts).filter(({ id }) => id !== String(a.id ?? '')));
         default: throw new Error(`places 没有 ${method} 这个方法`);
       }
     } catch (err) {
@@ -1189,21 +1227,11 @@ export class MapWorld {
   }
 
   async #saveDrafts(drafts) {
-    if (!Array.isArray(drafts) || drafts.length > 61) throw new Error('草稿数量无效');
-    const clean = new Map();
-    const limits = { name: 40, desc: 400, style: 160, aliases: 300, kind: 20, scene: 40, funVenue: 40, tags: 240, relationsJson: 1600 };
-    for (const entry of drafts) {
-      if (!entry || typeof entry.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/.test(entry.id) || entry.id.includes('..')) continue;
-      const fields = {};
-      for (const [key, limit] of Object.entries(limits)) {
-        if (typeof entry.fields?.[key] === 'string') fields[key] = entry.fields[key].slice(0, limit);
-      }
-      if (Object.keys(fields).length) clean.set(entry.id, fields);
-    }
+    const clean = normalizeDrafts(drafts);
     if (JSON.stringify([...clean]) === JSON.stringify([...this.#drafts])) return { ok: true };
     const file = join(this.dataDir, 'map', 'drafts.json');
     await mkdir(dirname(file), { recursive: true });
-    await writeFile(`${file}.tmp`, JSON.stringify({ version: 1, drafts: [...clean].map(([id, fields]) => ({ id, fields })) }), 'utf8');
+    await writeFile(`${file}.tmp`, JSON.stringify({ version: 1, drafts: draftEntries(clean) }), 'utf8');
     await rename(`${file}.tmp`, file);
     this.#drafts = clean;
     return { ok: true };
@@ -1213,6 +1241,17 @@ export class MapWorld {
     if (a.expectedRevision !== revisionOf([this.#state, a.bundle, a.mode ?? 'skip', a.decisions ?? null])) return { ok: false, error: '地点、文件或导入模式已变化，请重新预览导入', conflict: true };
     const plan = prepareImport(this.#state, a.bundle, { mode: a.mode, decisions: a.decisions });
     const previous = structuredClone(this.#state);
+    const previousById = new Map(previous.places.map((place) => [place.id, place]));
+    const withoutModifiedAt = (place) => {
+      const { modifiedAt, ...content } = place;
+      return content;
+    };
+    for (const place of plan.state.places) {
+      const before = previousById.get(place.id);
+      if (before && JSON.stringify(withoutModifiedAt(before)) !== JSON.stringify(withoutModifiedAt(place))) {
+        place.modifiedAt = this.#now();
+      }
+    }
     if (!this.#state.homeId && plan.state.homeId) {
       const namedHome = plan.state.places.find((p) => p.id === plan.state.homeId);
       if (namedHome && previous.places.some((p) => p.name === namedHome.name && p.id !== namedHome.id)) {
@@ -1314,6 +1353,20 @@ export class MapWorld {
     const r = await this.#writeCover(id, dataUrl);
     if (!r.ok) return { ok: false, error: r.error };
     return { ok: true, cover: r.cover, mime: r.mime, bytes: r.bytes };
+  }
+
+  async #panelCoverFocus(a) {
+    const place = placeById(this.#state, String(a.id ?? ''));
+    if (!place) return { ok: false, error: `没有这一处（${String(a.id ?? '')}）` };
+    const currentRevision = revisionOf(place);
+    if ((a.expectedCover !== undefined && a.expectedCover !== place.cover)
+      || (a.expectedRevision !== undefined && a.expectedRevision !== currentRevision)) {
+      return { ok: false, conflict: true, current: { ...placeView(place, this.#state), revision: currentRevision } };
+    }
+    const { error, changed } = setCoverFocus(this.#state, place.id, { x: a.x, y: a.y }, this.#now());
+    if (error) return { ok: false, error };
+    if (changed) await this.#save();
+    return { ok: true, changed, place: { ...placeView(place, this.#state), revision: revisionOf(place) } };
   }
 
   async #panelClearCover(id) {
@@ -1530,7 +1583,7 @@ export class MapWorld {
     this.#state = await this.#load();
     try {
       const draftFile = JSON.parse(await readFile(join(this.dataDir, 'map', 'drafts.json'), 'utf8'));
-      this.#drafts = new Map((draftFile.drafts ?? []).filter((d) => d && typeof d.id === 'string' && d.fields).map((d) => [d.id, d.fields]));
+      this.#drafts = normalizeDrafts(draftFile.drafts ?? []);
     } catch { this.#drafts = new Map(); }
     // 三个联动装没装：启动时读一次（只读 config 的布尔字段）。
     await this.#refreshInstalled(true).catch(() => {});

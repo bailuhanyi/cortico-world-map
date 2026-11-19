@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { test, report } from './harness.mjs';
 import {
   KIND_LABEL, KINDS, TERRAINS, coverName, findPlace, findPlaceCandidates, findTerrain, hasFunVenue, hasScene, isSafeId,
-  isTerrain, normalizeKind, normalizePlace, slugFor, terrainPlaces,
+  isTerrain, normalizeKind, normalizeModifiedAt, normalizePlace, slugFor, terrainPlaces,
 } from '../src/places.js';
 
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ test('守门断言：place 不含任何 geo 字段（不带路线/坐标/距离/
 
 test('守门断言：归一化后的 place 字段集合包含标签和关系', () => {
   const EXPECTED = [
-    'id', 'name', 'aliases', 'kind', 'desc', 'style', 'cover', 'scene', 'funVenue', 'frequent', 'terrain', 'relations', 'tags',
+    'id', 'name', 'aliases', 'kind', 'desc', 'style', 'cover', 'scene', 'funVenue', 'frequent', 'terrain', 'relations', 'tags', 'modifiedAt',
   ];
   for (const p of ALL_SKELETONS) {
     assert.deepEqual(Object.keys(p).sort(), [...EXPECTED].sort(), `${p.id} 的字段集合漂了`);
@@ -183,6 +183,15 @@ test('normalizePlace：terrain 认不出来就留空，认得出来就留', () =
   assert.equal(normalizePlace({ id: 'a', name: 'A', terrain: 'forest' }).terrain, 'forest');
   assert.equal(normalizePlace({ id: 'a', name: 'A', terrain: '火星' }).terrain, '');
   assert.equal(normalizePlace({ id: 'a', name: 'A' }, 'forest').terrain, 'forest', '骨架回填地形');
+});
+
+test('normalizeModifiedAt and normalizePlace keep finite nonnegative numbers, defaulting legacy and invalid values to zero', () => {
+  assert.equal(normalizeModifiedAt(0), 0);
+  assert.equal(normalizeModifiedAt(12.5), 12.5);
+  for (const value of [-1, NaN, Infinity, '12', null, undefined]) assert.equal(normalizeModifiedAt(value), 0);
+  assert.equal(normalizePlace({ id: 'legacy', name: '旧地点' }).modifiedAt, 0);
+  assert.equal(normalizePlace({ id: 'time', name: '新地点', modifiedAt: 42.5 }).modifiedAt, 42.5);
+  for (const value of [-1, NaN, Infinity, '42']) assert.equal(normalizePlace({ id: 'bad-time', name: '坏时间', modifiedAt: value }).modifiedAt, 0);
 });
 
 test('coverName：只留文件名，剥掉目录，不安全的名字变空', () => {
@@ -332,6 +341,20 @@ test('terrainPlaces：显式启用25处示例描写，默认空白兼容且只�
     assert.deepEqual(terrainPlaces(t.id, { withDescriptions: false }), defaults);
   }
   assert.deepEqual(terrainPlaces('火星', { withDescriptions: true }), []);
+});
+
+test('coverFocus is optional, finite image percentages and bound to a cover', () => {
+  const raw = { id: 'crop', name: '图片', cover: 'crop.png' };
+  assert.equal(Object.hasOwn(normalizePlace(raw), 'coverFocus'), false);
+  for (const focus of [{ x: 0, y: 100 }, { x: 12.5, y: 66.25 }, { x: 50, y: 50 }]) {
+    const normalized = normalizePlace({ ...raw, coverFocus: { ...focus, extra: 'drop' } });
+    assert.deepEqual(normalized.coverFocus, focus);
+    assert.notEqual(normalized.coverFocus, focus);
+  }
+  for (const focus of [null, [], {}, { x: '12', y: 1 }, { x: NaN, y: 1 }, { x: 1, y: Infinity }, { x: -1, y: 1 }, { x: 1, y: 101 }]) {
+    assert.equal(Object.hasOwn(normalizePlace({ ...raw, coverFocus: focus }), 'coverFocus'), false);
+  }
+  assert.equal(Object.hasOwn(normalizePlace({ ...raw, cover: '', coverFocus: { x: 2, y: 3 } }), 'coverFocus'), false);
 });
 
 await report();

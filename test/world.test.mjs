@@ -10,6 +10,7 @@
  *   D. 回执里不出现路线/坐标/距离字眼（需求红线的第二道守门）。
  */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +23,7 @@ import {
   sniffImage,
 } from '../src/world.js';
 import { applyTerrain } from '../src/state.js';
+import { terrainPlaces } from '../src/places.js';
 
 const TZ = 'Asia/Shanghai';
 const NOW = Date.parse('2026-11-15T14:00:00+08:00');
@@ -469,7 +471,7 @@ test('map_look：没图时明说没图，有图时说文件名', async () => {
   assert.equal(up.ok, true, up.error);
   const w2 = Object.fromEntries(world.tools().map((t) => [t.name, t.handler]));
   const r = await w2.map_look({ place: '溪边' });
-  assert.ok(r.text.includes('forest-creek.png'), r.text);
+  assert.ok(r.text.includes(up.cover), r.text);
   assert.ok(r.text.includes('有图'), r.text);
 });
 
@@ -986,12 +988,12 @@ test('上传：真 PNG 能进、挂上、读回 data URL；非图片被拒', asy
   const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(32, 7)]);
   const ok = await world.webUi('zh').invoke('places', 'upload', [{ id: 'forest-creek', data: `data:image/png;base64,${png.toString('base64')}` }]);
   assert.equal(ok.ok, true, ok.error);
-  assert.equal(ok.cover, 'forest-creek.png');
+  assert.match(ok.cover, /^forest-creek\.[a-f0-9]{12}\.png$/);
   const back = await world.webUi('zh').invoke('places', 'cover', [{ id: 'forest-creek' }]);
   assert.equal(back.ok, true);
   assert.ok(back.dataUrl.startsWith('data:image/png;base64,'), back.dataUrl.slice(0, 40));
   // 文件真落盘了
-  assert.deepEqual(await readdir(join(dataDir, 'map', 'covers')), ['forest-creek.png']);
+  assert.deepEqual(await readdir(join(dataDir, 'map', 'covers')), [ok.cover]);
 
   const bad = await world.webUi('zh').invoke('places', 'upload', [{ id: 'forest-creek', data: `data:image/png;base64,${Buffer.from('hello').toString('base64')}` }]);
   assert.equal(bad.ok, false, '不是图片该被拒');
@@ -1001,9 +1003,9 @@ test('上传：真 PNG 能进、挂上、读回 data URL；非图片被拒', asy
 test('读图：文件被删掉时面板拿到「没图」，不报错', async () => {
   const { world, dataDir } = await makeWorld({ imggen: false, terrain: 'forest' });
   const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, 1)]);
-  await world.webUi('zh').invoke('places', 'upload', [{ id: 'forest-creek', data: `data:image/png;base64,${png.toString('base64')}` }]);
+  const uploaded = await world.webUi('zh').invoke('places', 'upload', [{ id: 'forest-creek', data: `data:image/png;base64,${png.toString('base64')}` }]);
   const { unlink } = await import('node:fs/promises');
-  await unlink(join(dataDir, 'map', 'covers', 'forest-creek.png'));
+  await unlink(join(dataDir, 'map', 'covers', uploaded.cover));
   const back = await world.webUi('zh').invoke('places', 'cover', [{ id: 'forest-creek' }]);
   assert.equal(back.ok, true, '文件没了也不该报错');
   assert.equal(back.dataUrl, '');
@@ -1105,7 +1107,7 @@ test('含封面世界导出导入，过期预览不会写入', async () => {
   const source = await makeWorld({ terrain: 'forest' }); const sourceUi = source.world.webUi('zh');
   const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, 3)]);
   await sourceUi.invoke('places', 'upload', [{ id: 'forest-creek', data: `data:image/png;base64,${png.toString('base64')}` }]);
-  const bundle = (await sourceUi.invoke('places', 'export')).bundle; assert.ok(bundle.covers['forest-creek.png']);
+  const bundle = (await sourceUi.invoke('places', 'export')).bundle; assert.ok(bundle.covers[bundle.state.places.find((p) => p.id === 'forest-creek').cover]);
   const target = await makeWorld(); const ui = target.world.webUi('zh');
   const preview = await ui.invoke('places', 'previewImport', [{ bundle, mode: 'overwrite' }]);
   await ui.invoke('places', 'add', [{ name: '预览后新增' }]);
@@ -1306,6 +1308,391 @@ test('删完之后又改了别处，撤销会被拒绝，那次修改不会被�
   const list = (await ui.invoke('places', 'list')).places;
   assert.equal(list.find((p) => p.id === 'forest-old-oak').desc, '删完之后又改的', '撤销被拒时那次修改必须还在');
   assert.equal(list.some((p) => p.id === 'forest-creek'), false);
+});
+
+test('coverFocus panel validates, persists, and returns complete revision conflicts', async () => {
+  const { world, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const id = 'forest-creek';
+  const get = async () => (await ui.invoke('places', 'list')).places.find((p) => p.id === id);
+  assert.equal((await ui.invoke('places', 'coverFocus', [{ id, x: 10, y: 20 }])).ok, false);
+  const png = Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, 5)]);
+  await ui.invoke('places', 'upload', [{ id, data: `data:image/png;base64,${png.toString('base64')}` }]);
+  const initial = await get();
+  const saved = await ui.invoke('places', 'coverFocus', [{ id, x: 25.5, y: 70, expectedCover: initial.cover, expectedRevision: initial.revision }]);
+  assert.equal(saved.ok, true, saved.error);
+  assert.deepEqual(saved.place.coverFocus, { x: 25.5, y: 70 });
+  assert.notEqual(saved.place.revision, initial.revision);
+  for (const patch of [{ x: '2', y: 3 }, { x: 0, y: 101 }, { x: NaN, y: 2 }, { x: 3 }, { x: 2, y: Infinity }]) {
+    assert.equal((await ui.invoke('places', 'coverFocus', [{ id, ...patch }])).ok, false);
+    assert.equal((await get()).revision, saved.place.revision);
+  }
+  const staleRevision = await ui.invoke('places', 'coverFocus', [{ id, x: 0, y: 100, expectedRevision: initial.revision }]);
+  assert.equal(staleRevision.conflict, true);
+  assert.deepEqual(staleRevision.current.coverFocus, saved.place.coverFocus);
+  const staleCover = await ui.invoke('places', 'coverFocus', [{ id, x: 0, y: 100, expectedCover: 'old.png' }]);
+  assert.equal(staleCover.conflict, true);
+  const editConflict = await ui.invoke('places', 'edit', [{ id, desc: 'stale', expectedRevision: initial.revision }]);
+  for (const key of ['name', 'aliases', 'kind', 'desc', 'style', 'scene', 'funVenue', 'frequent', 'tags', 'relations', 'cover', 'coverFocus', 'revision']) {
+    assert.deepEqual(editConflict.current[key], saved.place[key], `conflict.current includes ${key}`);
+  }
+  await world.stop();
+  const restarted = new MapWorld({ cfg: { ...DEFAULTS, enabled: true }, dataDir, timezone: TZ, now: () => NOW });
+  await restarted.start(makeHost());
+  const next = restarted.webUi('zh');
+  assert.deepEqual((await next.invoke('places', 'list')).places.find((p) => p.id === id).coverFocus, saved.place.coverFocus);
+  assert.equal((await next.invoke('places', 'coverFocus', [{ id, x: 50, y: 50 }])).ok, true);
+  assert.equal(Object.hasOwn((await next.invoke('places', 'list')).places.find((p) => p.id === id), 'coverFocus'), false);
+  await restarted.stop();
+});
+
+test('same-extension cover replacements invalidate stale focus and keep backup image files', async () => {
+  const { world, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const id = 'forest-creek';
+  const data = (n) => `data:image/png;base64,${Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(16, n)]).toString('base64')}`;
+  const first = await ui.invoke('places', 'upload', [{ id, data: data(1) }]);
+  const before = (await ui.invoke('places', 'list')).places.find((p) => p.id === id);
+  const second = await ui.invoke('places', 'upload', [{ id, data: data(2) }]);
+  assert.notEqual(first.cover, second.cover);
+  const stale = await ui.invoke('places', 'coverFocus', [{ id, x: 2, y: 3, expectedCover: before.cover, expectedRevision: before.revision }]);
+  assert.equal(stale.conflict, true);
+  assert.equal(stale.current.cover, second.cover);
+  const existing = await readdir(join(dataDir, 'map', 'covers'));
+  assert.ok(existing.includes(first.cover));
+  assert.ok(existing.includes(second.cover));
+  await ui.invoke('places', 'coverFocus', [{ id, x: 2, y: 3 }]);
+  await ui.invoke('places', 'upload', [{ id, data: data(2) }]);
+  assert.equal(Object.hasOwn((await ui.invoke('places', 'list')).places.find((p) => p.id === id), 'coverFocus'), false);
+  await ui.invoke('places', 'coverFocus', [{ id, x: 2, y: 3 }]);
+  await ui.invoke('places', 'clearCover', [{ id }]);
+  const cleared = (await ui.invoke('places', 'list')).places.find((p) => p.id === id);
+  assert.equal(cleared.cover, '');
+  assert.equal(Object.hasOwn(cleared, 'coverFocus'), false);
+  await world.stop();
+});
+
+test('draft base snapshots sanitize, survive restarts/removals, and retain historical drafts', async () => {
+  const { world, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const p = (await ui.invoke('places', 'list')).places[0];
+  const base = { revision: p.revision, fields: { name: p.name, desc: 'original', aliases: 'old alias', relationsJson: '[]', extra: 'drop' } };
+  const drafts = [
+    { id: p.id, fields: { desc: 'draft', extra: 'drop' }, base },
+    { id: 'new', fields: { name: 'historical' } },
+    { id: 'invalid-base', fields: { desc: 'keep' }, base: { revision: 'bad', fields: { desc: 'drop' } } },
+  ];
+  assert.equal((await ui.invoke('places', 'saveDrafts', [{ drafts }])).ok, true);
+  const expected = [
+    { id: p.id, fields: { desc: 'draft' }, base: { revision: p.revision, fields: { name: p.name, desc: 'original', aliases: 'old alias', relationsJson: '[]' } } },
+    drafts[1],
+    { id: 'invalid-base', fields: { desc: 'keep' } },
+  ];
+  assert.deepEqual((await ui.invoke('places', 'drafts')).drafts, expected);
+  assert.deepEqual(JSON.parse(await readFile(join(dataDir, 'map', 'drafts.json'), 'utf8')).drafts, expected);
+  await world.stop();
+  const restarted = new MapWorld({ cfg: { ...DEFAULTS, enabled: true }, dataDir, timezone: TZ, now: () => NOW });
+  await restarted.start(makeHost());
+  const next = restarted.webUi('zh');
+  assert.deepEqual((await next.invoke('places', 'drafts')).drafts, expected);
+  assert.equal((await next.invoke('places', 'removeDraft', [{ id: 'new' }])).ok, true);
+  assert.deepEqual((await next.invoke('places', 'drafts')).drafts, [expected[0], expected[2]]);
+  await restarted.stop();
+});
+
+const coverPng = (n) => Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(8, n)]);
+const coverData = (n) => `data:image/png;base64,${coverPng(n).toString('base64')}`;
+const viewPrefs = (id) => ({
+  version: 1,
+  savedViews: [{ id: 'favorite-view', name: '  溪边  ', query: '  water  ', filter: 'hasCover', tagFilter: '', view: 'relations', sort: 'viewed' }],
+  recentViewed: [id, id], recentEdited: [id], pinned: [id],
+});
+
+test('cover inspection inventories current, saved, disk, backup, recovery and undo references without writes', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const id = 'forest-creek';
+  const first = await ui.invoke('places', 'upload', [{ id, data: coverData(1) }]);
+  const second = await ui.invoke('places', 'upload', [{ id, data: coverData(2) }]);
+  const before = (await ui.invoke('places', 'export')).bundle;
+  const plan = await ui.invoke('places', 'previewImport', [{ bundle: before, mode: 'overwrite' }]);
+  assert.equal((await ui.invoke('places', 'import', [{ bundle: before, mode: 'overwrite', expectedRevision: plan.expectedRevision }])).ok, true);
+  const third = (await ui.invoke('places', 'list')).places.find((place) => place.id === id).cover;
+  const removal = await ui.invoke('places', 'remove', [{ id }]);
+  const currentId = 'forest-home';
+  const fourth = await ui.invoke('places', 'upload', [{ id: currentId, data: coverData(4) }]);
+  const paths = [world.stateFile(), `${world.stateFile()}.bak`, world.recoveryFile()];
+  const beforeBytes = await Promise.all(paths.map((path) => readFile(path)));
+  const covers = await readdir(world.coversDir());
+  const inspected = await ui.invoke('places', 'inspectCovers');
+  assert.equal(inspected.ok, true);
+  assert.deepEqual(inspected.missing, []);
+  assert.deepEqual(inspected.warnings, []);
+  const files = new Map(inspected.files.map((file) => [file.filename, file]));
+  for (const file of files.values()) assert.equal(file.bytes, coverPng(1).length);
+  assert.deepEqual(files.get(first.cover).references, []);
+  assert.deepEqual(files.get(second.cover).references, [{ source: 'recovery', placeId: id }]);
+  assert.deepEqual(files.get(third).references, [{ source: 'undo', placeId: id }]);
+  assert.deepEqual(files.get(fourth.cover).references, ['current', 'saved', 'disk'].map((source) => ({ source, placeId: currentId })));
+  assert.deepEqual(await ui.invoke('places', 'inspectCovers'), inspected);
+  assert.deepEqual(await Promise.all(paths.map((path) => readFile(path))), beforeBytes);
+  assert.deepEqual(await readdir(world.coversDir()), covers);
+  assert.equal((await ui.invoke('places', 'list')).undo.token, removal.undo.token);
+  await world.stop();
+});
+
+test('cover archive checks content revisions, moves only known orphans, and restores without loss', async () => {
+  const { world, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const coverDir = world.coversDir();
+  await mkdir(coverDir, { recursive: true });
+  const filename = 'orphan.png';
+  await writeFile(join(coverDir, filename), coverPng(1));
+  let inventory = await ui.invoke('places', 'inspectCovers');
+  const candidate = inventory.files.find((file) => file.filename === filename);
+  assert.equal(candidate.archiveable, true);
+  assert.deepEqual(candidate.references, []);
+  const originalState = await readFile(world.stateFile());
+  const altered = coverPng(2);
+  await writeFile(join(coverDir, filename), altered);
+  const stale = await ui.invoke('places', 'archiveCovers', [{ filenames: [filename], expectedRevision: inventory.revision }]);
+  assert.equal(stale.ok, false);
+  assert.deepEqual(await readFile(join(coverDir, filename)), altered, 'stale inventory cannot move changed bytes');
+  inventory = await ui.invoke('places', 'inspectCovers');
+  const archived = await ui.invoke('places', 'archiveCovers', [{ filenames: [filename], expectedRevision: inventory.revision }]);
+  assert.equal(archived.ok, true, archived.error);
+  assert.match(archived.archive.id, /^[0-9a-f-]{36}$/i);
+  assert.deepEqual(archived.archive.files, [{ filename, bytes: altered.length, sha256: createHash('sha256').update(altered).digest('hex') }]);
+  await assert.rejects(readFile(join(coverDir, filename)), { code: 'ENOENT' });
+  const quarantined = join(dataDir, 'map', 'cover-archive', archived.archive.id, filename);
+  assert.deepEqual(await readFile(quarantined), altered);
+  const archives = await ui.invoke('places', 'listCoverArchives');
+  assert.equal(archives.archives.length, 1);
+  assert.equal(archives.archives[0].status, 'archived');
+  assert.deepEqual(await readFile(world.stateFile()), originalState, 'archiving does not mutate state');
+  const restored = await ui.invoke('places', 'restoreCoverArchive', [{ id: archived.archive.id }]);
+  assert.deepEqual(restored, { ok: true, archiveId: archived.archive.id, restored: [filename], alreadyPresent: [] });
+  assert.deepEqual(await readFile(join(coverDir, filename)), altered);
+  const again = await ui.invoke('places', 'restoreCoverArchive', [{ id: archived.archive.id }]);
+  assert.deepEqual(again.alreadyPresent, [filename], 'restore is idempotent and preserves archive copy');
+  assert.deepEqual(await readFile(quarantined), altered);
+  await world.stop();
+});
+
+test('cover archive rejects referenced images and malformed snapshot history', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const upload = await ui.invoke('places', 'upload', [{ id: 'forest-creek', data: coverData(3) }]);
+  const inventory = await ui.invoke('places', 'inspectCovers');
+  const referenced = inventory.files.find((file) => file.filename === upload.cover);
+  assert.equal(referenced.archiveable, false);
+  assert.ok(referenced.references.length);
+  assert.equal((await ui.invoke('places', 'archiveCovers', [{ filenames: [upload.cover], expectedRevision: inventory.revision }])).ok, false);
+  assert.deepEqual(await readFile(join(world.coversDir(), upload.cover)), coverPng(3));
+  const corrupt = join(world.dataDir, 'map', 'state.json.corrupt-test');
+  await writeFile(corrupt, '{not-json');
+  const unsafe = await ui.invoke('places', 'inspectCovers');
+  assert.ok(unsafe.warnings.some((warning) => warning.source === 'snapshot:state.json.corrupt-test'));
+  assert.equal((await ui.invoke('places', 'archiveCovers', [{ filenames: ['loose.png'], expectedRevision: unsafe.revision }])).ok, false);
+  assert.equal((await ui.invoke('places', 'deleteCovers', [{ filename: upload.cover }])).ok, false, 'there is no permanent delete RPC');
+  await world.stop();
+});
+
+test('cover archive never overwrites a conflicting path during restore', async () => {
+  const { world } = await makeWorld();
+  const ui = world.webUi('zh');
+  const covers = world.coversDir();
+  await mkdir(covers, { recursive: true });
+  const filename = 'kept.png';
+  await writeFile(join(covers, filename), coverPng(4));
+  const inventory = await ui.invoke('places', 'inspectCovers');
+  const archived = await ui.invoke('places', 'archiveCovers', [{ filenames: [filename], expectedRevision: inventory.revision }]);
+  assert.equal(archived.ok, true, archived.error);
+  const conflict = coverPng(5);
+  await writeFile(join(covers, filename), conflict);
+  const refused = await ui.invoke('places', 'restoreCoverArchive', [{ id: archived.archive.id }]);
+  assert.equal(refused.ok, false);
+  assert.match(refused.error, /不会覆盖/);
+  assert.deepEqual(await readFile(join(covers, filename)), conflict);
+  assert.deepEqual(await readFile(join(world.dataDir, 'map', 'cover-archive', archived.archive.id, filename)), coverPng(4));
+  await world.stop();
+});
+
+test('cover inspection retains raw disk and staged references and reports missing or unreadable entries', async () => {
+  const { world } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const covers = world.coversDir();
+  await mkdir(covers);
+  const filename = 'historical.PNG';
+  await writeFile(join(covers, filename), coverPng(1));
+  await writeFile(join(covers, 'cover.png.tmp'), coverPng(2));
+  await mkdir(join(covers, 'folder.png'));
+  await writeFile(`${world.stateFile()}.bak`, JSON.stringify({ places: [{ id: 'old-place', name: '旧地点', cover: filename }] }));
+  await writeFile(`${world.stateFile()}.tmp`, JSON.stringify({ version: 1, places: [{ id: 'raw-place', cover: filename }] }));
+  await writeFile(`${world.stateFile()}.bak.tmp`, JSON.stringify({ version: 1, places: [{ id: 'staged-place', cover: 'missing.png' }] }));
+  await writeFile(world.recoveryFile(), '{broken');
+  const inventory = await ui.invoke('places', 'inspectCovers');
+  assert.deepEqual(inventory.files.map(({ filename, bytes, references }) => ({ filename, bytes, references })), [{ filename, bytes: 16, references: [{ source: 'backup', placeId: 'old-place' }, { source: 'staged-state', placeId: 'raw-place' }] }]);
+  assert.deepEqual(inventory.missing, [{ filename: 'missing.png', references: [{ source: 'staged-backup', placeId: 'staged-place' }] }]);
+  assert.deepEqual(inventory.warnings, [
+    { source: 'backup', code: 'invalid-snapshot' },
+    { source: 'recovery', code: 'invalid-snapshot' },
+    { source: 'covers', code: 'skipped-entry' },
+  ]);
+  assert.equal((await ui.invoke('places', 'deleteCovers', [{ filename }])).ok, false);
+  assert.deepEqual(await readFile(join(covers, filename)), coverPng(1));
+  await world.stop();
+});
+
+test('cover inspection stays read-only when state cannot be read', async () => {
+  const dataDir = await makeDataDir({});
+  const world = new MapWorld({ dataDir });
+  await mkdir(world.coversDir(), { recursive: true });
+  await writeFile(world.stateFile(), '{broken');
+  await writeFile(join(world.coversDir(), 'kept.png'), coverPng(1));
+  await world.start(makeHost());
+  const ui = world.webUi('zh');
+  assert.ok((await ui.invoke('places', 'list')).storageWarning);
+  const inventory = await ui.invoke('places', 'inspectCovers');
+  assert.deepEqual(inventory.files.map(({ filename, bytes, references }) => ({ filename, bytes, references })), [{ filename: 'kept.png', bytes: 16, references: [] }]);
+  assert.deepEqual(inventory.warnings, [{ source: 'disk', code: 'invalid-snapshot' }]);
+  await world.stop();
+  assert.equal(await readFile(world.stateFile(), 'utf8'), '{broken');
+  assert.deepEqual(await readFile(join(world.coversDir(), 'kept.png')), coverPng(1));
+});
+
+test('panel preferences persist independently and do not invalidate undo revisions', async () => {
+  const { world, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const id = 'forest-home';
+  const prefsFile = join(dataDir, 'map', 'views.json');
+  assert.deepEqual(await ui.invoke('places', 'getPanelPrefs'), { ok: true, prefs: { version: 1, savedViews: [], recentViewed: [], recentEdited: [], pinned: [] } });
+  await assert.rejects(readFile(prefsFile), { code: 'ENOENT' });
+  const removal = await ui.invoke('places', 'remove', [{ id: 'forest-creek' }]);
+  const paths = [world.stateFile(), `${world.stateFile()}.bak`];
+  const previous = await Promise.all(paths.map((path) => readFile(path)));
+  const revision = (await ui.invoke('places', 'list')).stateRevision;
+  const prefs = viewPrefs(id);
+  const saved = await ui.invoke('places', 'savePanelPrefs', [{ prefs }]);
+  assert.equal(saved.ok, true, saved.error);
+  assert.equal(saved.prefs.savedViews[0].name, '溪边');
+  assert.equal(saved.prefs.savedViews[0].query, 'water');
+  assert.deepEqual(saved.prefs.recentViewed, [id]);
+  assert.deepEqual(JSON.parse(await readFile(prefsFile, 'utf8')), saved.prefs);
+  assert.deepEqual(await Promise.all(paths.map((path) => readFile(path))), previous);
+  assert.equal((await ui.invoke('places', 'list')).stateRevision, revision);
+  assert.equal((await ui.invoke('places', 'undoRemove', [{ token: removal.undo.token }])).ok, true);
+  await world.stop();
+  const restarted = new MapWorld({ dataDir });
+  await restarted.start(makeHost());
+  const next = restarted.webUi('zh');
+  assert.deepEqual(await next.invoke('places', 'getPanelPrefs'), saved);
+  assert.equal(Object.hasOwn((await next.invoke('places', 'export')).bundle.state, 'savedViews'), false);
+  await restarted.stop();
+});
+
+test('panel preferences reject invalid edits, excessive entries and newer versions', async () => {
+  const { world, dataDir } = await makeWorld({ terrain: 'forest' });
+  const ui = world.webUi('zh');
+  const id = 'forest-home';
+  const prefsFile = join(dataDir, 'map', 'views.json');
+  const save = (prefs) => ui.invoke('places', 'savePanelPrefs', [{ prefs }]);
+  const prefs = viewPrefs(id);
+  const baseline = await save(prefs);
+  assert.equal(baseline.ok, true, baseline.error);
+  const view = prefs.savedViews[0];
+  for (const patch of [{ name: '   ' }, { query: 'z'.repeat(161) }, { filter: 'other' }, { sort: 'other' }, { view: 'other' }, { tagFilter: '<bad>' }, { id: '../escaped' }]) {
+    assert.equal((await save({ ...prefs, savedViews: [{ ...view, ...patch }] })).ok, false, JSON.stringify(patch));
+  }
+  assert.equal((await save({ ...prefs, savedViews: [{ ...view, filter: 'noRelation' }] })).ok, true);
+  const afterNoRelation = await ui.invoke('places', 'getPanelPrefs');
+  assert.equal(afterNoRelation.prefs.savedViews[0].filter, 'noRelation');
+  assert.equal((await save(prefs)).ok, true);
+  assert.equal((await save({ ...prefs, savedViews: [{ ...view, filter: 'other' }] })).ok, false);
+  assert.equal((await save({ ...prefs, pinned: ['../escaped'] })).ok, false);
+  assert.equal((await save({ ...prefs, pinned: Array.from({ length: 61 }, (_, i) => `pin${i}`) })).ok, false);
+  assert.equal((await save({ ...prefs, recentViewed: ['../escaped'] })).ok, false);
+  assert.equal((await save({ ...prefs, recentEdited: Array.from({ length: 13 }, (_, i) => `p${i}`) })).ok, false);
+  assert.equal((await save({ ...prefs, savedViews: Array.from({ length: 9 }, (_, i) => ({ ...view, id: `v${i}` })) })).ok, false);
+  assert.deepEqual(await ui.invoke('places', 'getPanelPrefs'), baseline);
+  await writeFile(prefsFile, '{broken');
+  assert.deepEqual((await ui.invoke('places', 'getPanelPrefs')).prefs.savedViews, []);
+  assert.equal((await save(prefs)).ok, true);
+  const future = JSON.stringify({ ...prefs, version: 2 });
+  await writeFile(prefsFile, future);
+  assert.equal((await ui.invoke('places', 'getPanelPrefs')).ok, false);
+  assert.equal((await save(prefs)).ok, false);
+  assert.equal(await readFile(prefsFile, 'utf8'), future);
+  await world.stop();
+});
+
+test('per-place modifiedAt follows actual current writes and survives reload', async () => {
+  let now = 1000;
+  const { world, dataDir } = await makeWorld({ terrain: 'forest', now: () => now });
+  const ui = world.webUi('zh');
+  const get = async (id) => (await ui.invoke('places', 'list')).places.find((place) => place.id === id);
+  assert.ok((await ui.invoke('places', 'list')).places.every((place) => place.modifiedAt === 1000));
+  now = 2000;
+  assert.equal((await ui.invoke('places', 'edit', [{ id: 'forest-creek', desc: '溪水' }])).ok, true);
+  assert.equal((await get('forest-creek')).modifiedAt, 2000);
+  now = 3000;
+  assert.equal((await ui.invoke('places', 'edit', [{ id: 'forest-creek', desc: '溪水' }])).changed.length, 0);
+  assert.equal((await get('forest-creek')).modifiedAt, 2000);
+  const png = `data:image/png;base64,${Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), Buffer.alloc(8, 1)]).toString('base64')}`;
+  now = 4000;
+  assert.equal((await ui.invoke('places', 'upload', [{ id: 'forest-creek', data: png }])).ok, true);
+  assert.equal((await get('forest-creek')).modifiedAt, 4000);
+  await world.stop();
+  const restarted = new MapWorld({ cfg: { ...DEFAULTS, enabled: true }, dataDir, now: () => now });
+  await restarted.start(makeHost());
+  assert.equal((await restarted.webUi('zh').invoke('places', 'list')).places.find((place) => place.id === 'forest-creek').modifiedAt, 4000);
+  await restarted.stop();
+});
+
+test('imports timestamp actual existing-place changes with current time but leave no-ops unchanged', async () => {
+  let now = 1000;
+  const { world } = await makeWorld({ terrain: 'forest', now: () => now });
+  const ui = world.webUi('zh');
+  const get = async () => (await ui.invoke('places', 'list')).places.find((place) => place.id === 'forest-creek');
+  const base = (await ui.invoke('places', 'export')).bundle;
+  base.state.places.find((place) => place.id === 'forest-creek').modifiedAt = 1;
+  base.state.places.find((place) => place.id === 'forest-creek').desc = '导入的新描写';
+  const preview = await ui.invoke('places', 'previewImport', [{ bundle: base, mode: 'overwrite' }]);
+  now = 2000;
+  const imported = await ui.invoke('places', 'import', [{ bundle: base, mode: 'overwrite', expectedRevision: preview.expectedRevision }]);
+  assert.equal(imported.ok, true, imported.error);
+  assert.equal((await get()).modifiedAt, 2000, '实际导入的当前修改使用现在的时间，不采用备份旧时间');
+  const same = (await ui.invoke('places', 'export')).bundle;
+  same.state.places.find((place) => place.id === 'forest-creek').modifiedAt = 0;
+  const noOpPreview = await ui.invoke('places', 'previewImport', [{ bundle: same, mode: 'overwrite' }]);
+  now = 3000;
+  assert.equal((await ui.invoke('places', 'import', [{ bundle: same, mode: 'overwrite', expectedRevision: noOpPreview.expectedRevision }])).ok, true);
+  assert.equal((await get()).modifiedAt, 2000, '仅改变备份里的时间而没有内容变化，不算当前编辑');
+  await world.stop();
+});
+
+test('legacy import recovery revisions remain usable with default zero timestamps', async () => {
+  const dataDir = await makeDataDir({});
+  const mapDir = join(dataDir, 'map');
+  await mkdir(mapDir, { recursive: true });
+  const legacyState = {
+    version: 1, terrain: 'forest',
+    places: terrainPlaces('forest').map(({ modifiedAt, ...place }) => place), updatedAt: 123,
+  };
+  const legacyText = JSON.stringify(legacyState, null, 2);
+  await writeFile(join(mapDir, 'state.json'), legacyText);
+  const before = { version: 1, terrain: '', places: [], updatedAt: 0 };
+  const oldRevision = createHash('sha256').update(JSON.stringify(legacyState)).digest('hex');
+  await writeFile(join(mapDir, 'import-recovery.json'), JSON.stringify({ version: 1, before, after: oldRevision }));
+  const world = new MapWorld({ cfg: { ...DEFAULTS, enabled: true }, dataDir });
+  await world.start(makeHost());
+  const ui = world.webUi('zh');
+  const info = await ui.invoke('places', 'recoveryInfo');
+  assert.equal(info.available, true);
+  assert.equal(info.canRestore, true);
+  assert.ok((await ui.invoke('places', 'list')).places.every((place) => place.modifiedAt === 0));
+  assert.equal((await ui.invoke('places', 'previewRestore')).ok, true);
+  await world.stop();
 });
 
 await report();
